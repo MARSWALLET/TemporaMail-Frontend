@@ -330,11 +330,11 @@ export function LiveInbox() {
             </div>
 
             <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
-              <div className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50/70 via-sky-50/40 to-indigo-50/50 px-4 py-3.5">
+              <div className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50/70 via-sky-50/40 to-indigo-50/50 px-4 py-3.5 dark:border-blue-900/70 dark:from-blue-950/60 dark:via-slate-900/80 dark:to-indigo-950/50">
                 {loadingInbox ? (
-                  <div className="h-7 w-64 animate-pulse rounded-lg bg-blue-100/70" />
+                  <div className="h-7 w-64 animate-pulse rounded-lg bg-blue-100/70 dark:bg-slate-800" />
                 ) : (
-                  <span className="truncate font-mono text-base font-semibold text-slate-900 sm:text-lg">
+                  <span className="truncate font-mono text-base font-semibold text-slate-900 sm:text-lg dark:text-white">
                     {inbox?.address ?? 'Unavailable'}
                   </span>
                 )}
@@ -362,7 +362,7 @@ export function LiveInbox() {
                     setSelectedDomain(nextDomain);
                     void allocateInbox(nextDomain);
                   }}
-                  className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-blue-900"
                 >
                   {domains.map((d) => (
                     <option key={d} value={d}>
@@ -380,18 +380,18 @@ export function LiveInbox() {
               <div
                 className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 font-mono text-sm font-semibold ${
                   isLowTime
-                    ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
-                    : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200/80'
+                    ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:ring-amber-800'
+                    : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700'
                 }`}
               >
-                <Clock className="h-4 w-4 text-blue-500" />
+                <Clock className="h-4 w-4 text-blue-500 dark:text-sky-400" />
                 {formatCountdown(msLeft)}
               </div>
               <button
                 type="button"
                 onClick={() => void handleExtend()}
                 disabled={!inbox}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/70 px-3.5 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/80 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/70 px-3.5 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/80 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950/60 dark:text-sky-300 dark:hover:bg-blue-900/60"
               >
                 <Plus className="h-4 w-4" />
                 +10m
@@ -399,7 +399,7 @@ export function LiveInbox() {
               <button
                 type="button"
                 onClick={() => void allocateInbox(selectedDomain)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-slate-50"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-blue-700 dark:hover:bg-slate-800"
               >
                 <RefreshCw className="h-4 w-4" />
                 New
@@ -409,7 +409,7 @@ export function LiveInbox() {
                 onClick={() => void handleDeleteInbox()}
                 disabled={!inbox}
                 title="Delete inbox and generate a new one"
-                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-rose-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-300"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
@@ -418,7 +418,7 @@ export function LiveInbox() {
         </div>
 
         {/* Subtle Expiry Progress Bar */}
-        <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+        <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
           <div
             className={`h-full rounded-full transition-all duration-700 ${
               isLowTime
@@ -430,7 +430,7 @@ export function LiveInbox() {
         </div>
 
         {error && (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-300">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
@@ -440,19 +440,19 @@ export function LiveInbox() {
       {/* Split-Pane Inbox Viewer */}
       <section className="tm-card grid min-h-[460px] overflow-hidden rounded-3xl lg:grid-cols-12">
         {/* Message List */}
-        <div className="flex flex-col border-b border-slate-100 lg:col-span-5 lg:border-r lg:border-b-0">
-          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-5 py-3.5">
+        <div className="flex flex-col border-b border-slate-100 lg:col-span-5 lg:border-r lg:border-b-0 dark:border-slate-800">
+          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-5 py-3.5 dark:border-slate-800 dark:bg-slate-900/60">
             <div className="flex items-center gap-2">
-              <Mail className="h-4 w-4 text-blue-600" />
-              <h2 className="text-sm font-semibold text-slate-800">Inbox</h2>
-              <span className="rounded-full bg-blue-100/80 px-2 py-0.5 text-xs font-semibold text-blue-700">
+              <Mail className="h-4 w-4 text-blue-600 dark:text-sky-400" />
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Inbox</h2>
+              <span className="rounded-full bg-blue-100/80 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-sky-300">
                 {messages.length}
               </span>
             </div>
             <button
               type="button"
               onClick={() => inbox && void refreshMessages(inbox.address)}
-              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-white hover:text-blue-600"
+              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-white hover:text-blue-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-sky-300"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Refresh
@@ -468,14 +468,16 @@ export function LiveInbox() {
                 height={146}
                 className="mb-3 opacity-95"
               />
-              <p className="text-sm font-semibold text-slate-700">Waiting for incoming mail…</p>
-              <p className="mt-1 max-w-xs text-xs leading-relaxed text-slate-500">
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Waiting for incoming mail…
+              </p>
+              <p className="mt-1 max-w-xs text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                 Send a verification code or email to your address above. New messages appear here
                 automatically in real time.
               </p>
             </div>
           ) : (
-            <ul className="divide-y divide-slate-100 overflow-y-auto">
+            <ul className="divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
               {messages.map((msg) => {
                 const isSelected = selectedMsgId === msg.id;
                 return (
@@ -485,19 +487,19 @@ export function LiveInbox() {
                       onClick={() => setSelectedMsgId(msg.id)}
                       className={`w-full px-5 py-4 text-left transition ${
                         isSelected
-                          ? 'bg-blue-50/75 ring-1 ring-inset ring-blue-200/70'
-                          : 'hover:bg-slate-50/80'
+                          ? 'bg-blue-50/75 ring-1 ring-inset ring-blue-200/70 dark:bg-blue-950/60 dark:ring-blue-800/70'
+                          : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-xs font-semibold text-blue-700">
+                        <span className="truncate text-xs font-semibold text-blue-700 dark:text-sky-400">
                           {msg.from || 'Unknown sender'}
                         </span>
                         <span className="shrink-0 text-[11px] text-slate-400">
                           {formatTime(msg.date)}
                         </span>
                       </div>
-                      <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                      <p className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">
                         {msg.subject || '(No subject)'}
                       </p>
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -529,41 +531,46 @@ export function LiveInbox() {
         </div>
 
         {/* Message Reader */}
-        <div className="flex flex-col bg-white lg:col-span-7">
+        <div className="flex flex-col bg-white lg:col-span-7 dark:bg-slate-950/40">
           {!selectedMsgId ? (
             <div className="flex flex-1 flex-col items-center justify-center p-10 text-center text-slate-400">
-              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-500">
+              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-500 dark:bg-blue-950/70 dark:text-sky-400">
                 <Mail className="h-6 w-6" />
               </div>
-              <p className="text-sm font-medium text-slate-600">Select a message to read</p>
+              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                Select a message to read
+              </p>
               <p className="mt-1 text-xs text-slate-400">
                 HTML is automatically sanitized and remote trackers are stripped.
               </p>
             </div>
           ) : loadingMessage || !fullMessage ? (
             <div className="space-y-4 p-6">
-              <div className="h-6 w-2/3 animate-pulse rounded-lg bg-slate-100" />
-              <div className="h-4 w-1/3 animate-pulse rounded-lg bg-slate-100" />
-              <div className="h-48 w-full animate-pulse rounded-2xl bg-slate-50" />
+              <div className="h-6 w-2/3 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+              <div className="h-4 w-1/3 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+              <div className="h-48 w-full animate-pulse rounded-2xl bg-slate-50 dark:bg-slate-900" />
             </div>
           ) : (
             <div className="flex flex-1 flex-col">
               {/* Message Header */}
-              <div className="border-b border-slate-100 p-5 sm:p-6">
+              <div className="border-b border-slate-100 p-5 sm:p-6 dark:border-slate-800">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <h3 className="text-lg font-bold text-slate-900">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">
                       {fullMessage.subject || '(No subject)'}
                     </h3>
-                    <p className="mt-1 text-xs text-slate-500">
-                      From <span className="font-semibold text-slate-700">{fullMessage.from}</span> ·{' '}
-                      {new Date(fullMessage.date).toLocaleString()}
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      From{' '}
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">
+                        {fullMessage.from}
+                      </span>{' '}
+                      · {new Date(fullMessage.date).toLocaleString()}
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => void handleDeleteMessage(fullMessage.id)}
-                    className="rounded-xl border border-slate-200 p-2 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                    className="rounded-xl border border-slate-200 p-2 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-slate-700 dark:hover:border-rose-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-300"
                     title="Delete message"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -617,15 +624,15 @@ export function LiveInbox() {
 
                 {/* Toolbar: HTML/Text toggle + privacy badge */}
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                  <div className="inline-flex rounded-xl bg-slate-100 p-1 text-xs font-medium">
+                  <div className="inline-flex rounded-xl bg-slate-100 p-1 text-xs font-medium dark:bg-slate-900">
                     <button
                       type="button"
                       onClick={() => setViewMode('html')}
                       disabled={!fullMessage.html}
                       className={`rounded-lg px-3 py-1 transition ${
                         viewMode === 'html'
-                          ? 'bg-white text-blue-700 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900 disabled:opacity-40'
+                          ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-800 dark:text-sky-300'
+                          : 'text-slate-600 hover:text-slate-900 disabled:opacity-40 dark:text-slate-400 dark:hover:text-white'
                       }`}
                     >
                       Rich HTML
@@ -635,8 +642,8 @@ export function LiveInbox() {
                       onClick={() => setViewMode('text')}
                       className={`rounded-lg px-3 py-1 transition ${
                         viewMode === 'text'
-                          ? 'bg-white text-blue-700 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                          ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-800 dark:text-sky-300'
+                          : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
                       }`}
                     >
                       Plain Text
@@ -644,7 +651,7 @@ export function LiveInbox() {
                   </div>
 
                   {fullMessage.hasRemoteContent && (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300">
                       <ShieldCheck className="h-3.5 w-3.5" />
                       Remote trackers stripped
                     </span>
@@ -659,10 +666,10 @@ export function LiveInbox() {
                     title="Email content"
                     sandbox="allow-popups allow-popups-to-escape-sandbox"
                     srcDoc={`<!doctype html><html><head><style>body{font-family:system-ui,-apple-system,sans-serif;color:#1e293b;line-height:1.6;margin:0;padding:4px;font-size:14px;word-wrap:break-word;}a{color:#2563eb;}</style></head><body>${fullMessage.html}</body></html>`}
-                    className="min-h-[260px] w-full rounded-2xl border border-slate-100 bg-white p-2"
+                    className="min-h-[260px] w-full rounded-2xl border border-slate-100 bg-white p-2 dark:border-slate-800"
                   />
                 ) : (
-                  <pre className="whitespace-pre-wrap rounded-2xl bg-slate-50/80 p-4 font-mono text-xs leading-relaxed text-slate-700">
+                  <pre className="whitespace-pre-wrap rounded-2xl bg-slate-50/80 p-4 font-mono text-xs leading-relaxed text-slate-700 dark:bg-slate-900/80 dark:text-slate-200">
                     {fullMessage.text || '(Empty message body)'}
                   </pre>
                 )}

@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-mono-code), ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -9,11 +11,21 @@
   color-scheme: light;
 }
 
+.dark {
+  color-scheme: dark;
+}
+
 body {
   background-color: #ffffff;
   color: #0f172a;
+  transition: background-color 200ms ease, color 200ms ease;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.dark body {
+  background-color: #060b18;
+  color: #f1f5f9;
 }
 
 /* Soft luminous ambient mesh in white, sky blue, royal blue & subtle indigo */
@@ -25,6 +37,14 @@ body {
     #ffffff;
 }
 
+.dark .tm-hero-bg {
+  background:
+    radial-gradient(55% 45% at 85% 8%, rgba(14, 165, 233, 0.18) 0%, rgba(6, 11, 24, 0) 70%),
+    radial-gradient(50% 45% at 12% 14%, rgba(37, 99, 235, 0.16) 0%, rgba(6, 11, 24, 0) 70%),
+    radial-gradient(45% 38% at 50% 0%, rgba(99, 102, 241, 0.14) 0%, rgba(6, 11, 24, 0) 70%),
+    #060b18;
+}
+
 .tm-card {
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(226, 232, 240, 0.9);
@@ -33,15 +53,34 @@ body {
     0 12px 32px -12px rgba(37, 99, 235, 0.08);
 }
 
-.tm-card-hover {
-  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
-}
-.tm-card-hover:hover {
-  transform: translateY(-1px);
-  border-color: rgba(147, 197, 253, 0.9);
+.dark .tm-card {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(51, 65, 85, 0.72);
   box-shadow:
-    0 4px 12px rgba(37, 99, 235, 0.08),
-    0 16px 36px -14px rgba(14, 165, 233, 0.14);
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 16px 36px -14px rgba(37, 99, 235, 0.2);
+}
+
+.dark .tm-card h1,
+.dark .tm-card h2,
+.dark .tm-card h3 {
+  color: #f8fafc;
+}
+
+.dark .tm-card label {
+  color: #cbd5e1;
+}
+
+.dark .tm-card input:not([type="checkbox"]),
+.dark .tm-card select,
+.dark .tm-card textarea {
+  background-color: rgba(15, 23, 42, 0.9);
+  border-color: rgba(71, 85, 105, 0.8);
+  color: #f8fafc;
+}
+
+.dark .tm-card input::placeholder {
+  color: #64748b;
 }
 
 @keyframes tm-float {
