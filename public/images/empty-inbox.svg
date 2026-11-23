@@ -1,0 +1,36 @@
+<svg width="260" height="200" viewBox="0 0 260 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="emptyAura" cx="50%" cy="55%" r="48%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trayGrad" x1="56" y1="98" x2="204" y2="170" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EFF6FF"/>
+      <stop offset="100%" stop-color="#DBEAFE"/>
+    </linearGradient>
+    <linearGradient id="planeGrad" x1="110" y1="30" x2="180" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#0EA5E9"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="130" cy="112" r="82" fill="url(#emptyAura)"/>
+
+  <!-- Dotted flight path -->
+  <path d="M70 86C95 54 134 44 168 56" stroke="#93C5FD" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 6"/>
+
+  <!-- Floating paper airplane -->
+  <path d="M188 46L134 66L153 75L188 46Z" fill="url(#planeGrad)"/>
+  <path d="M188 46L153 75L162 92L188 46Z" fill="#6366F1"/>
+  <path d="M153 75L156 88L162 92L153 75Z" fill="#1D4ED8"/>
+
+  <!-- Clean white & sky-blue inbox tray -->
+  <rect x="58" y="96" width="144" height="72" rx="18" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="2"/>
+  <path d="M58 128H98L108 142H152L162 128H202V150C202 159.9 193.9 168 184 168H76C66.1 168 58 159.9 58 150V128Z" fill="url(#trayGrad)"/>
+  <path d="M58 128H98L108 142H152L162 128H202" stroke="#60A5FA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Subtle sparkles -->
+  <circle cx="72" cy="70" r="4" fill="#38BDF8"/>
+  <circle cx="204" cy="82" r="3" fill="#818CF8"/>
+  <circle cx="192" cy="112" r="2.5" fill="#10B981"/>
+</svg>

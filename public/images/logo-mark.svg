@@ -1,0 +1,22 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tmLogoBg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="55%" stop-color="#0EA5E9"/>
+      <stop offset="100%" stop-color="#6366F1"/>
+    </linearGradient>
+    <linearGradient id="tmLogoShine" x1="12" y1="6" x2="48" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.34"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#tmLogoBg)"/>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#tmLogoShine)"/>
+  <!-- Envelope body -->
+  <rect x="14" y="20" width="36" height="25" rx="6" fill="#FFFFFF" fill-opacity="0.96"/>
+  <!-- Envelope flap -->
+  <path d="M16.5 23L30.2 33.4C31.26 34.2 32.74 34.2 33.8 33.4L47.5 23" stroke="#2563EB" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Live pulse badge -->
+  <circle cx="48" cy="18" r="6" fill="#FFFFFF"/>
+  <circle cx="48" cy="18" r="3.8" fill="#10B981"/>
+</svg>
