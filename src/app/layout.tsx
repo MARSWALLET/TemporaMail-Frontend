@@ -22,6 +22,7 @@ export const metadata: Metadata = {
   title: 'TemporaMail — Instant, Private Temporary Email',
   description:
     'Disposable receive-only temporary email addresses with real-time SSE inbox streaming, instant OTP extraction, and zero spam.',
+  manifest: '/manifest.json',
 };
 
 const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('temporamail_theme');if(s==='dark'||(!s&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}})();`;
@@ -50,12 +51,26 @@ export default function RootLayout({ children }: { readonly children: ReactNode 
                     </span>{' '}
                     · Receive-only disposable email with automatic expiry.
                   </p>
-                  <div className="flex items-center gap-4">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <a
+                      href="/developers"
+                      className="font-medium text-slate-600 transition hover:text-blue-600 dark:text-slate-300 dark:hover:text-sky-400"
+                    >
+                      Developer API
+                    </a>
+                    <span>·</span>
+                    <a
+                      href="https://globeverify.com"
+                      target="_blank"
+                      rel="noopener"
+                      className="font-medium text-blue-600 transition hover:underline dark:text-sky-400"
+                    >
+                      SMS Verification by GlobeVerify
+                    </a>
+                    <span>·</span>
                     <span>Zero tracking</span>
                     <span>·</span>
                     <span>Real-time SSE</span>
-                    <span>·</span>
-                    <span>Auto-sanitized HTML</span>
                   </div>
                 </div>
               </footer>

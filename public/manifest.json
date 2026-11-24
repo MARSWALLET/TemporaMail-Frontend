@@ -1,0 +1,16 @@
+{
+  "name": "TemporaMail",
+  "short_name": "TemporaMail",
+  "description": "Instant, private temporary email with real-time SSE streaming and OTP extraction.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/images/logo-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

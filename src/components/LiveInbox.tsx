@@ -1,20 +1,27 @@
 'use client';
 
 import Image from 'next/image';
+import QRCode from 'qrcode';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Bell,
   Check,
   Clock,
   Copy,
+  Download,
   ExternalLink,
   Mail,
   Paperclip,
   Plus,
+  QrCode,
   RefreshCw,
   ShieldCheck,
   Sparkles,
   Trash2,
+  Volume2,
+  VolumeX,
+  X,
 } from 'lucide-react';
 import {
   api,
@@ -47,6 +54,56 @@ function formatTime(iso: string): string {
   }
 }
 
+function playNotificationChime(): void {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    const playTone = (freq: number, start: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.exponentialRampToValueAtTime(0.12, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + duration);
+    };
+
+    playTone(587.33, now, 0.16); // D5
+    playTone(880.0, now + 0.11, 0.24); // A5
+    setTimeout(() => void ctx.close(), 500);
+  } catch {
+    // Ignore autoplay/WebAudio restrictions
+  }
+}
+
+function downloadMessageAsEml(msg: FullMessage): void {
+  const headers = [
+    `From: ${msg.from}`,
+    `To: ${msg.to.join(', ')}`,
+    `Subject: ${msg.subject}`,
+    `Date: ${new Date(msg.date).toUTCString()}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=utf-8',
+  ].join('\r\n');
+  const eml = `${headers}\r\n\r\n${msg.text || msg.html}`;
+  const blob = new Blob([eml], { type: 'message/rfc822' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(msg.subject || 'message').replace(/[^a-z0-9-_]+/gi, '_').slice(0, 40)}.eml`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function LiveInbox() {
   const [domains, setDomains] = useState<string[]>(['temporamail.app']);
   const [selectedDomain, setSelectedDomain] = useState<string>('temporamail.app');
@@ -62,9 +119,63 @@ export function LiveInbox() {
   const [loadingMessage, setLoadingMessage] = useState<boolean>(false);
   const [copiedAddr, setCopiedAddr] = useState<boolean>(false);
   const [copiedOtp, setCopiedOtp] = useState<boolean>(false);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
+  const [qrOpen, setQrOpen] = useState<boolean>(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  const soundEnabledRef = useRef<boolean>(true);
+  const notificationsEnabledRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
+
+  useEffect(() => {
+    notificationsEnabledRef.current = notificationsEnabled;
+  }, [notificationsEnabled]);
+
+  // Reset dynamic tab title when user focuses the tab
+  useEffect(() => {
+    const resetTitle = () => {
+      document.title = 'TemporaMail — Instant, Private Temporary Email';
+    };
+    window.addEventListener('focus', resetTitle);
+    return () => {
+      window.removeEventListener('focus', resetTitle);
+      resetTitle();
+    };
+  }, []);
+
+  // Generate QR data URL when modal opens
+  useEffect(() => {
+    if (!qrOpen || !inbox) return;
+    void QRCode.toDataURL(inbox.address, {
+      width: 240,
+      margin: 2,
+      color: { dark: '#0f172a', light: '#ffffff' },
+    })
+      .then(setQrDataUrl)
+      .catch(() => setQrDataUrl(''));
+  }, [qrOpen, inbox]);
+
+  async function handleToggleNotifications() {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (notificationsEnabled) {
+      setNotificationsEnabled(false);
+      return;
+    }
+    if (Notification.permission === 'granted') {
+      setNotificationsEnabled(true);
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      setNotificationsEnabled(true);
+    }
+  }
 
   const allocateInbox = useCallback(async (domain?: string) => {
     setLoadingInbox(true);
@@ -188,6 +299,49 @@ export function LiveInbox() {
           if (prev.some((m) => m.id === summary.id)) return prev;
           return [summary, ...prev];
         });
+
+        if (soundEnabledRef.current) {
+          playNotificationChime();
+        }
+
+        // Flash OTP or New Mail right in the browser tab title + optional desktop notification
+        if (summary.hasOtp) {
+          void api
+            .getMessage(inbox.address, summary.id)
+            .then((full) => {
+              const titleText = full.otp
+                ? `(${full.otp}) New OTP — TemporaMail`
+                : '(1) New Mail — TemporaMail';
+              document.title = titleText;
+              if (
+                notificationsEnabledRef.current &&
+                typeof window !== 'undefined' &&
+                'Notification' in window &&
+                Notification.permission === 'granted'
+              ) {
+                new Notification(full.otp ? `OTP Code: ${full.otp}` : 'New TemporaMail Message', {
+                  body: `${summary.from}: ${summary.subject || '(No subject)'}`,
+                  icon: '/images/logo-mark.svg',
+                });
+              }
+            })
+            .catch(() => {
+              document.title = '(1) New Mail — TemporaMail';
+            });
+        } else {
+          document.title = `(1) ${summary.subject || 'New Mail'} — TemporaMail`;
+          if (
+            notificationsEnabledRef.current &&
+            typeof window !== 'undefined' &&
+            'Notification' in window &&
+            Notification.permission === 'granted'
+          ) {
+            new Notification('New TemporaMail Message', {
+              body: `${summary.from}: ${summary.subject || '(No subject)'}`,
+              icon: '/images/logo-mark.svg',
+            });
+          }
+        }
       } catch {
         void refreshMessages(inbox.address);
       }
@@ -406,6 +560,39 @@ export function LiveInbox() {
               </button>
               <button
                 type="button"
+                onClick={() => setQrOpen(true)}
+                disabled={!inbox}
+                title="Show QR code for phone"
+                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-sky-700 dark:hover:text-sky-300"
+              >
+                <QrCode className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setSoundEnabled((s) => !s)}
+                title={soundEnabled ? 'Mute arrival chime' : 'Enable arrival chime'}
+                className={`inline-flex items-center justify-center rounded-xl border p-2 transition ${
+                  soundEnabled
+                    ? 'border-blue-200 bg-blue-50/70 text-blue-600 dark:border-blue-800 dark:bg-blue-950/60 dark:text-sky-300'
+                    : 'border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-900'
+                }`}
+              >
+                {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleToggleNotifications()}
+                title={notificationsEnabled ? 'Desktop alerts on' : 'Enable desktop OTP alerts'}
+                className={`inline-flex items-center justify-center rounded-xl border p-2 transition ${
+                  notificationsEnabled
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                    : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+                }`}
+              >
+                <Bell className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
                 onClick={() => void handleDeleteInbox()}
                 disabled={!inbox}
                 title="Delete inbox and generate a new one"
@@ -567,14 +754,25 @@ export function LiveInbox() {
                       · {new Date(fullMessage.date).toLocaleString()}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleDeleteMessage(fullMessage.id)}
-                    className="rounded-xl border border-slate-200 p-2 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-slate-700 dark:hover:border-rose-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-300"
-                    title="Delete message"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => downloadMessageAsEml(fullMessage)}
+                      className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-2.5 py-2 text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-sky-700 dark:hover:bg-slate-800"
+                      title="Download as .eml"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      .eml
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteMessage(fullMessage.id)}
+                      className="rounded-xl border border-slate-200 p-2 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-slate-700 dark:hover:border-rose-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-300"
+                      title="Delete message"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* OTP Quick Copy Card */}
@@ -650,12 +848,18 @@ export function LiveInbox() {
                     </button>
                   </div>
 
-                  {fullMessage.hasRemoteContent && (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300">
                       <ShieldCheck className="h-3.5 w-3.5" />
-                      Remote trackers stripped
+                      Sanitized HTML
                     </span>
-                  )}
+                    {fullMessage.hasRemoteContent && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300">
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        Remote trackers blocked
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -700,6 +904,50 @@ export function LiveInbox() {
           )}
         </div>
       </section>
+      {/* QR Code Transfer Modal */}
+      {qrOpen && inbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-xs"
+          onClick={() => setQrOpen(false)}
+        >
+          <div
+            className="tm-card w-full max-w-sm rounded-3xl p-6 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Scan to use on phone
+              </h3>
+              <button
+                type="button"
+                onClick={() => setQrOpen(false)}
+                className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="my-5 flex justify-center">
+              {qrDataUrl ? (
+                <img
+                  src={qrDataUrl}
+                  alt={`QR code for ${inbox.address}`}
+                  width={220}
+                  height={220}
+                  className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm"
+                />
+              ) : (
+                <div className="h-[220px] w-[220px] animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800" />
+              )}
+            </div>
+            <p className="break-all font-mono text-xs font-semibold text-blue-700 dark:text-sky-300">
+              {inbox.address}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Scan with your phone camera to copy this temporary address instantly.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

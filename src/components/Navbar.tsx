@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { KeyRound, LayoutDashboard, LogOut, Mail, Moon, Settings, Sun } from 'lucide-react';
+import { Code2, KeyRound, LayoutDashboard, LogOut, Mail, Moon, Settings, Sun } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 import { useTheme } from './ThemeProvider';
 
@@ -50,6 +50,10 @@ export function Navbar() {
             <Link href="/" className={navLinkClass('/')}>
               <Mail className="h-4 w-4" />
               Live Inbox
+            </Link>
+            <Link href="/developers" className={navLinkClass('/developers')}>
+              <Code2 className="h-4 w-4" />
+              Developers
             </Link>
             {user && (
               <>
