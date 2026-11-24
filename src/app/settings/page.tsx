@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import QRCode from 'qrcode';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Download, LogOut, ShieldCheck, Smartphone, Trash2 } from 'lucide-react';
+import { Check, Copy, Download, LogOut, ShieldCheck, Smartphone, Trash2 } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { api, ApiClientError, type UserSessionItem } from '@/lib/api';
 
@@ -12,12 +13,28 @@ export default function SettingsPage() {
   const { user, loading, refresh, logout } = useAuth();
   const [sessions, setSessions] = useState<UserSessionItem[]>([]);
   const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null);
+  const [totpQrDataUrl, setTotpQrDataUrl] = useState<string>('');
+  const [copiedSecret, setCopiedSecret] = useState(false);
   const [totpCode, setTotpCode] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
   const [deleteEmail, setDeleteEmail] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!totpSetup?.otpauthUrl) {
+      setTotpQrDataUrl('');
+      return;
+    }
+    void QRCode.toDataURL(totpSetup.otpauthUrl, {
+      width: 220,
+      margin: 2,
+      color: { dark: '#09090b', light: '#ffffff' },
+    })
+      .then(setTotpQrDataUrl)
+      .catch(() => setTotpQrDataUrl(''));
+  }, [totpSetup]);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -167,29 +184,79 @@ export default function SettingsPage() {
           </div>
 
           {totpSetup && (
-            <form onSubmit={(e) => void handleEnable2fa(e)} className="mt-5 space-y-4 border-t border-slate-100 pt-5">
-              <p className="text-xs text-slate-600">
-                Add this secret to Google Authenticator, 1Password, or Authy, then enter the 6-digit
-                code to confirm:
+            <form
+              onSubmit={(e) => void handleEnable2fa(e)}
+              className="mt-5 space-y-4 border-t border-zinc-200 pt-5 dark:border-zinc-800"
+            >
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                Scan this QR code with Google Authenticator, 1Password, Apple Passwords, or Authy,
+                or enter the setup key manually, then enter the 6-digit code to confirm:
               </p>
-              <code className="block rounded-2xl bg-blue-50/70 px-4 py-3 font-mono text-sm font-bold tracking-wider text-blue-900">
-                {totpSetup.secret}
-              </code>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  required
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value)}
-                  placeholder="6-digit code"
-                  className="w-44 rounded-2xl border border-slate-200 px-4 py-2.5 font-mono text-sm outline-none focus:border-blue-500"
-                />
-                <button
-                  type="submit"
-                  className="rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:brightness-110"
-                >
-                  Confirm &amp; Enable
-                </button>
+
+              <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-center">
+                <div className="flex h-48 w-48 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-white p-2.5 shadow-xs dark:border-zinc-700">
+                  {totpQrDataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={totpQrDataUrl}
+                      alt="Authenticator app QR code"
+                      className="h-full w-full"
+                    />
+                  ) : (
+                    <span className="text-xs text-zinc-400">Generating QR...</span>
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1 space-y-3">
+                  <div>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                        Manual Setup Key
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(totpSetup.secret);
+                          setCopiedSecret(true);
+                          setTimeout(() => setCopiedSecret(false), 1800);
+                        }}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {copiedSecret ? (
+                          <>
+                            <Check className="h-3 w-3" /> Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" /> Copy key
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <code className="block break-all rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 font-mono text-xs font-bold tracking-wider text-zinc-900 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-100">
+                      {totpSetup.secret}
+                    </code>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="text"
+                      required
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      value={totpCode}
+                      onChange={(e) => setTotpCode(e.target.value)}
+                      placeholder="6-digit code"
+                      className="w-44 rounded-xl border border-zinc-200 px-3.5 py-2 font-mono text-sm tracking-widest outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-100"
+                    />
+                    <button
+                      type="submit"
+                      className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                    >
+                      Confirm &amp; Enable
+                    </button>
+                  </div>
+                </div>
               </div>
             </form>
           )}
