@@ -1,22 +1,33 @@
 'use client';
 
 import Image from 'next/image';
+import Link from 'next/link';
 import QRCode from 'qrcode';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Bell,
   Check,
   Clock,
+  Columns2,
+  Command,
   Copy,
   Download,
   ExternalLink,
+  GripVertical,
+  Link2,
   Mail,
+  Maximize2,
   Paperclip,
+  PenLine,
+  Pencil,
   Plus,
   QrCode,
   RefreshCw,
+  Rows2,
+  Search,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Volume2,
@@ -30,8 +41,24 @@ import {
   type FullMessage,
   type MessageSummary,
 } from '@/lib/api';
+import { extractVerificationLink } from '@/lib/linkExtractor';
+import {
+  DEFAULT_WORKSPACE_PREFS,
+  loadStoredTabs,
+  loadWorkspacePrefs,
+  saveStoredTabs,
+  saveWorkspacePrefs,
+  type EmailPaperMode,
+  type StoredInboxTab,
+  type WorkspaceDensity,
+  type WorkspaceFontSize,
+  type WorkspaceLayout,
+  type WorkspacePrefs,
+} from '@/lib/workspacePrefs';
+import { EmailAnnotatorModal } from '@/components/EmailAnnotatorModal';
+import { CommandPalette, type PaletteAction } from '@/components/CommandPalette';
 
-const STORAGE_KEY = 'temporamail_active_inbox';
+const MAX_TABS = 5;
 
 function formatCountdown(msRemaining: number): string {
   const totalSec = Math.max(0, Math.floor(msRemaining / 1000));
@@ -69,7 +96,7 @@ function playNotificationChime(): void {
       osc.type = 'sine';
       osc.frequency.setValueAtTime(freq, start);
       gain.gain.setValueAtTime(0.001, start);
-      gain.gain.exponentialRampToValueAtTime(0.12, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.11, start + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
       osc.connect(gain);
       gain.connect(ctx.destination);
@@ -77,9 +104,9 @@ function playNotificationChime(): void {
       osc.stop(start + duration);
     };
 
-    playTone(587.33, now, 0.16); // D5
-    playTone(880.0, now + 0.11, 0.24); // A5
-    setTimeout(() => void ctx.close(), 500);
+    playTone(587.33, now, 0.15);
+    playTone(880.0, now + 0.11, 0.22);
+    setTimeout(() => void ctx.close(), 480);
   } catch {
     // Ignore autoplay/WebAudio restrictions
   }
@@ -104,38 +131,101 @@ function downloadMessageAsEml(msg: FullMessage): void {
   URL.revokeObjectURL(url);
 }
 
+function makeTabId(): string {
+  return `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function isEditableElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    target.isContentEditable
+  );
+}
+
 export function LiveInbox() {
   const [domains, setDomains] = useState<string[]>(['temporamail.app']);
   const [selectedDomain, setSelectedDomain] = useState<string>('temporamail.app');
-  const [inbox, setInbox] = useState<CreatedInbox | null>(null);
+
+  // Multi-inbox tabs
+  const [tabs, setTabs] = useState<StoredInboxTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
+
+  // Active inbox messages
   const [messages, setMessages] = useState<MessageSummary[]>([]);
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
   const [fullMessage, setFullMessage] = useState<FullMessage | null>(null);
   const [viewMode, setViewMode] = useState<'html' | 'text'>('html');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
+  // Workspace preferences (persisted)
+  const [prefs, setPrefs] = useState<WorkspacePrefs>(DEFAULT_WORKSPACE_PREFS);
+  const [prefsOpen, setPrefsOpen] = useState<boolean>(false);
+  const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
+  const [annotatorOpen, setAnnotatorOpen] = useState<boolean>(false);
+
+  // Inline alias editing
+  const [editingAlias, setEditingAlias] = useState<boolean>(false);
+  const [aliasDraft, setAliasDraft] = useState<string>('');
+  const [aliasBusy, setAliasBusy] = useState<boolean>(false);
+  const [aliasHint, setAliasHint] = useState<string | null>(null);
+
+  // Status & feedback
   const [streamStatus, setStreamStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
   const [msLeft, setMsLeft] = useState<number>(0);
   const [loadingInbox, setLoadingInbox] = useState<boolean>(true);
   const [loadingMessage, setLoadingMessage] = useState<boolean>(false);
   const [copiedAddr, setCopiedAddr] = useState<boolean>(false);
   const [copiedOtp, setCopiedOtp] = useState<boolean>(false);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
-  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
+  const [autoCopiedToast, setAutoCopiedToast] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState<boolean>(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [isDraggingSplit, setIsDraggingSplit] = useState<boolean>(false);
 
   const eventSourceRef = useRef<EventSource | null>(null);
-  const soundEnabledRef = useRef<boolean>(true);
-  const notificationsEnabledRef = useRef<boolean>(false);
+  const prefsRef = useRef<WorkspacePrefs>(DEFAULT_WORKSPACE_PREFS);
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const prefsPopoverRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    soundEnabledRef.current = soundEnabled;
-  }, [soundEnabled]);
+  const activeTab = useMemo(
+    () => tabs.find((t) => t.id === activeTabId) ?? tabs[0] ?? null,
+    [tabs, activeTabId],
+  );
+  const inbox = activeTab?.inbox ?? null;
 
+  const updatePrefs = useCallback((patch: Partial<WorkspacePrefs>) => {
+    setPrefs((prev) => {
+      const next = { ...prev, ...patch };
+      prefsRef.current = next;
+      saveWorkspacePrefs(next);
+      return next;
+    });
+  }, []);
+
+  // Load persisted prefs on mount
   useEffect(() => {
-    notificationsEnabledRef.current = notificationsEnabled;
-  }, [notificationsEnabled]);
+    const loaded = loadWorkspacePrefs();
+    prefsRef.current = loaded;
+    setPrefs(loaded);
+  }, []);
+
+  // Close preferences popover on outside click
+  useEffect(() => {
+    if (!prefsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (prefsPopoverRef.current && !prefsPopoverRef.current.contains(e.target as Node)) {
+        setPrefsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [prefsOpen]);
 
   // Reset dynamic tab title when user focuses the tab
   useEffect(() => {
@@ -155,55 +245,11 @@ export function LiveInbox() {
     void QRCode.toDataURL(inbox.address, {
       width: 240,
       margin: 2,
-      color: { dark: '#0f172a', light: '#ffffff' },
+      color: { dark: '#09090b', light: '#ffffff' },
     })
       .then(setQrDataUrl)
       .catch(() => setQrDataUrl(''));
   }, [qrOpen, inbox]);
-
-  async function handleToggleNotifications() {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (notificationsEnabled) {
-      setNotificationsEnabled(false);
-      return;
-    }
-    if (Notification.permission === 'granted') {
-      setNotificationsEnabled(true);
-      return;
-    }
-    const perm = await Notification.requestPermission();
-    if (perm === 'granted') {
-      setNotificationsEnabled(true);
-    }
-  }
-
-  const allocateInbox = useCallback(async (domain?: string) => {
-    setLoadingInbox(true);
-    setError(null);
-    setSelectedMsgId(null);
-    setFullMessage(null);
-    setMessages([]);
-
-    try {
-      const created = await api.createInbox(domain ? { domain } : {});
-      setInbox(created);
-      setMsLeft(Math.max(0, Date.parse(created.expiresAt) - Date.now()));
-      try {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(created));
-      } catch {
-        // Ignore storage quota errors
-      }
-    } catch (err) {
-      const msg =
-        err instanceof ApiClientError
-          ? err.message
-          : 'Could not connect to TemporaMail API. Make sure the backend is running.';
-      setError(msg);
-      setStreamStatus('offline');
-    } finally {
-      setLoadingInbox(false);
-    }
-  }, []);
 
   const refreshMessages = useCallback(async (address: string) => {
     try {
@@ -214,7 +260,49 @@ export function LiveInbox() {
     }
   }, []);
 
-  // Initial boot: fetch domains + restore or create inbox
+  const createNewTab = useCallback(
+    async (domain?: string, replaceCurrent = false) => {
+      setLoadingInbox(true);
+      setError(null);
+      setAliasHint(null);
+      setEditingAlias(false);
+
+      try {
+        const created = await api.createInbox(domain ? { domain } : {});
+        const newTab: StoredInboxTab = { id: makeTabId(), inbox: created };
+
+        setTabs((prev) => {
+          let next: StoredInboxTab[];
+          if (replaceCurrent && activeTabId) {
+            next = prev.map((t) => (t.id === activeTabId ? newTab : t));
+          } else {
+            next = [...prev, newTab].slice(-MAX_TABS);
+          }
+          saveStoredTabs(next);
+          return next;
+        });
+
+        setActiveTabId(newTab.id);
+        setSelectedMsgId(null);
+        setFullMessage(null);
+        setMessages([]);
+        setSearchQuery('');
+        setMsLeft(Math.max(0, Date.parse(created.expiresAt) - Date.now()));
+      } catch (err) {
+        const msg =
+          err instanceof ApiClientError
+            ? err.message
+            : 'Could not connect to TemporaMail API. Make sure the backend is running.';
+        setError(msg);
+        setStreamStatus('offline');
+      } finally {
+        setLoadingInbox(false);
+      }
+    },
+    [activeTabId],
+  );
+
+  // Initial boot: fetch domains + hydrate persisted tabs or create first inbox
   useEffect(() => {
     let cancelled = false;
 
@@ -231,40 +319,57 @@ export function LiveInbox() {
 
       if (cancelled) return;
 
-      try {
-        const savedRaw = sessionStorage.getItem(STORAGE_KEY);
-        if (savedRaw) {
-          const saved = JSON.parse(savedRaw) as CreatedInbox;
-          if (saved.address && Date.parse(saved.expiresAt) > Date.now() + 5000) {
-            try {
-              const status = await api.getInboxStatus(saved.address);
-              if (!cancelled) {
-                const hydrated: CreatedInbox = { ...saved, expiresAt: status.expiresAt };
-                setInbox(hydrated);
-                setMsLeft(Math.max(0, Date.parse(status.expiresAt) - Date.now()));
-                await refreshMessages(saved.address);
-                setLoadingInbox(false);
-                return;
-              }
-            } catch {
-              sessionStorage.removeItem(STORAGE_KEY);
-            }
-          }
+      const stored = loadStoredTabs();
+      const validTabs: StoredInboxTab[] = [];
+      for (const tab of stored) {
+        try {
+          const status = await api.getInboxStatus(tab.inbox.address);
+          validTabs.push({
+            ...tab,
+            inbox: { ...tab.inbox, expiresAt: status.expiresAt },
+          });
+        } catch {
+          // Drop expired tab
         }
-      } catch {
-        // Ignore sessionStorage read errors
       }
 
-      if (!cancelled) {
-        await allocateInbox();
+      if (cancelled) return;
+
+      if (validTabs.length > 0) {
+        saveStoredTabs(validTabs);
+        setTabs(validTabs);
+        const first = validTabs[0]!;
+        setActiveTabId(first.id);
+        const domainPart = first.inbox.address.split('@')[1];
+        if (domainPart) setSelectedDomain(domainPart);
+        setMsLeft(Math.max(0, Date.parse(first.inbox.expiresAt) - Date.now()));
+        await refreshMessages(first.inbox.address);
+        setLoadingInbox(false);
+        return;
       }
+
+      await createNewTab();
     }
 
     void init();
     return () => {
       cancelled = true;
     };
-  }, [allocateInbox, refreshMessages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // When active tab changes, load its messages
+  useEffect(() => {
+    if (!inbox) return;
+    setSelectedMsgId(null);
+    setFullMessage(null);
+    setSearchQuery('');
+    setEditingAlias(false);
+    setAliasHint(null);
+    const domainPart = inbox.address.split('@')[1];
+    if (domainPart) setSelectedDomain(domainPart);
+    void refreshMessages(inbox.address);
+  }, [inbox?.address, refreshMessages]);
 
   // Countdown tick
   useEffect(() => {
@@ -288,9 +393,7 @@ export function LiveInbox() {
     const es = new EventSource(api.getStreamUrl(inbox.address));
     eventSourceRef.current = es;
 
-    es.onopen = () => {
-      setStreamStatus('live');
-    };
+    es.onopen = () => setStreamStatus('live');
 
     es.addEventListener('message', (event: MessageEvent) => {
       try {
@@ -300,11 +403,11 @@ export function LiveInbox() {
           return [summary, ...prev];
         });
 
-        if (soundEnabledRef.current) {
+        const curPrefs = prefsRef.current;
+        if (curPrefs.soundEnabled) {
           playNotificationChime();
         }
 
-        // Flash OTP or New Mail right in the browser tab title + optional desktop notification
         if (summary.hasOtp) {
           void api
             .getMessage(inbox.address, summary.id)
@@ -313,8 +416,19 @@ export function LiveInbox() {
                 ? `(${full.otp}) New OTP — TemporaMail`
                 : '(1) New Mail — TemporaMail';
               document.title = titleText;
+
+              if (full.otp && curPrefs.autoCopyOtp && navigator.clipboard) {
+                void navigator.clipboard
+                  .writeText(full.otp)
+                  .then(() => {
+                    setAutoCopiedToast(`Auto-copied OTP: ${full.otp}`);
+                    setTimeout(() => setAutoCopiedToast(null), 3200);
+                  })
+                  .catch(() => {});
+              }
+
               if (
-                notificationsEnabledRef.current &&
+                curPrefs.notificationsEnabled &&
                 typeof window !== 'undefined' &&
                 'Notification' in window &&
                 Notification.permission === 'granted'
@@ -331,7 +445,7 @@ export function LiveInbox() {
         } else {
           document.title = `(1) ${summary.subject || 'New Mail'} — TemporaMail`;
           if (
-            notificationsEnabledRef.current &&
+            curPrefs.notificationsEnabled &&
             typeof window !== 'undefined' &&
             'Notification' in window &&
             Notification.permission === 'granted'
@@ -349,12 +463,11 @@ export function LiveInbox() {
 
     es.addEventListener('expired', () => {
       setStreamStatus('offline');
-      es.close();
-      sessionStorage.removeItem(STORAGE_KEY);
+      setMsLeft(0);
     });
 
     es.onerror = () => {
-      setStreamStatus('offline');
+      setStreamStatus('connecting');
     };
 
     return () => {
@@ -363,107 +476,692 @@ export function LiveInbox() {
     };
   }, [inbox, refreshMessages]);
 
-  // Load full message when selected
-  useEffect(() => {
-    if (!inbox || !selectedMsgId) {
-      setFullMessage(null);
-      return;
-    }
+  const handleOpenMessage = useCallback(
+    async (msgId: string) => {
+      if (!inbox) return;
+      setSelectedMsgId(msgId);
+      setLoadingMessage(true);
+      try {
+        const full = await api.getMessage(inbox.address, msgId);
+        setFullMessage(full);
+        setViewMode(full.html ? 'html' : 'text');
+      } catch {
+        setError('Could not load message contents.');
+      } finally {
+        setLoadingMessage(false);
+      }
+    },
+    [inbox],
+  );
 
-    let cancelled = false;
-    setLoadingMessage(true);
-
-    void api
-      .getMessage(inbox.address, selectedMsgId)
-      .then((msg) => {
-        if (!cancelled) {
-          setFullMessage(msg);
-          setViewMode(msg.html ? 'html' : 'text');
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setFullMessage(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingMessage(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [inbox, selectedMsgId]);
-
-  async function handleCopyAddress() {
+  const handleCopyAddress = useCallback(async () => {
     if (!inbox) return;
-    await navigator.clipboard.writeText(inbox.address);
-    setCopiedAddr(true);
-    setTimeout(() => setCopiedAddr(false), 1800);
-  }
-
-  async function handleCopyOtp(otp: string) {
-    await navigator.clipboard.writeText(otp);
-    setCopiedOtp(true);
-    setTimeout(() => setCopiedOtp(false), 1800);
-  }
-
-  async function handleExtend() {
-    if (!inbox) return;
-    setError(null);
     try {
-      const updated = await api.extendInbox(inbox.address, inbox.ownerToken, 10);
-      const next: CreatedInbox = { ...inbox, expiresAt: updated.expiresAt };
-      setInbox(next);
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Could not extend inbox');
+      await navigator.clipboard.writeText(inbox.address);
+      setCopiedAddr(true);
+      setTimeout(() => setCopiedAddr(false), 1800);
+    } catch {
+      // Fallback ignored
     }
-  }
+  }, [inbox]);
 
-  async function handleDeleteInbox() {
+  const handleCopyOtp = useCallback(async (otp: string) => {
+    try {
+      await navigator.clipboard.writeText(otp);
+      setCopiedOtp(true);
+      setTimeout(() => setCopiedOtp(false), 1800);
+    } catch {
+      // Fallback ignored
+    }
+  }, []);
+
+  const handleExtend = useCallback(async () => {
+    if (!inbox || !activeTab) return;
+    try {
+      const res = await api.extendInbox(inbox.address, inbox.ownerToken, 10);
+      const updatedInbox: CreatedInbox = { ...inbox, expiresAt: res.expiresAt };
+      setTabs((prev) => {
+        const next = prev.map((t) => (t.id === activeTab.id ? { ...t, inbox: updatedInbox } : t));
+        saveStoredTabs(next);
+        return next;
+      });
+      setMsLeft(Math.max(0, Date.parse(res.expiresAt) - Date.now()));
+    } catch (err) {
+      if (err instanceof ApiClientError) setError(err.message);
+    }
+  }, [inbox, activeTab]);
+
+  const handleDeleteInbox = useCallback(async () => {
     if (!inbox) return;
     try {
       await api.deleteInbox(inbox.address, inbox.ownerToken);
     } catch {
-      // Ignore if already expired
+      // Proceed to replace inbox even if already expired
     }
-    sessionStorage.removeItem(STORAGE_KEY);
-    await allocateInbox(selectedDomain);
-  }
+    await createNewTab(selectedDomain, true);
+  }, [inbox, selectedDomain, createNewTab]);
 
-  async function handleDeleteMessage(msgId: string) {
-    if (!inbox) return;
-    try {
-      await api.deleteMessage(inbox.address, msgId, inbox.ownerToken);
-      setMessages((prev) => prev.filter((m) => m.id !== msgId));
-      if (selectedMsgId === msgId) {
-        setSelectedMsgId(null);
-        setFullMessage(null);
+  const handleDeleteMessage = useCallback(
+    async (msgId: string) => {
+      if (!inbox) return;
+      try {
+        await api.deleteMessage(inbox.address, msgId, inbox.ownerToken);
+        setMessages((prev) => prev.filter((m) => m.id !== msgId));
+        if (selectedMsgId === msgId) {
+          setSelectedMsgId(null);
+          setFullMessage(null);
+        }
+      } catch (err) {
+        if (err instanceof ApiClientError) setError(err.message);
       }
-    } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Failed to delete message');
-    }
-  }
+    },
+    [inbox, selectedMsgId],
+  );
 
-  const isLowTime = msLeft > 0 && msLeft < 120_000;
-  const progressPct = Math.min(100, Math.max(0, (msLeft / (10 * 60 * 1000)) * 100));
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      if (tabs.length <= 1) return;
+      const idx = tabs.findIndex((t) => t.id === tabId);
+      const next = tabs.filter((t) => t.id !== tabId);
+      saveStoredTabs(next);
+      setTabs(next);
+      if (activeTabId === tabId) {
+        const fallback = next[Math.max(0, idx - 1)] ?? next[0];
+        setActiveTabId(fallback?.id ?? null);
+      }
+    },
+    [tabs, activeTabId],
+  );
+
+  const handleTabDrop = useCallback(
+    (targetTabId: string) => {
+      if (!draggedTabId || draggedTabId === targetTabId) return;
+      setTabs((prev) => {
+        const fromIdx = prev.findIndex((t) => t.id === draggedTabId);
+        const toIdx = prev.findIndex((t) => t.id === targetTabId);
+        if (fromIdx === -1 || toIdx === -1) return prev;
+        const copy = [...prev];
+        const [moved] = copy.splice(fromIdx, 1);
+        if (!moved) return prev;
+        copy.splice(toIdx, 0, moved);
+        saveStoredTabs(copy);
+        return copy;
+      });
+      setDraggedTabId(null);
+    },
+    [draggedTabId],
+  );
+
+  const handleToggleNotifications = useCallback(async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (prefs.notificationsEnabled) {
+      updatePrefs({ notificationsEnabled: false });
+      return;
+    }
+    if (Notification.permission === 'granted') {
+      updatePrefs({ notificationsEnabled: true });
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      updatePrefs({ notificationsEnabled: true });
+    }
+  }, [prefs.notificationsEnabled, updatePrefs]);
+
+  // Inline custom alias claim (for signed-in accounts)
+  const handleStartEditAlias = useCallback(() => {
+    if (!inbox) return;
+    const localPart = inbox.address.split('@')[0] ?? '';
+    setAliasDraft(localPart);
+    setAliasHint(null);
+    setEditingAlias(true);
+  }, [inbox]);
+
+  const handleSubmitAlias = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const cleaned = aliasDraft.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+      if (cleaned.length < 3) {
+        setAliasHint('Use at least 3 characters (letters, numbers, ., _, -).');
+        return;
+      }
+      setAliasBusy(true);
+      setAliasHint(null);
+      try {
+        const created = await api.createAccountInbox({
+          domain: selectedDomain,
+          customName: cleaned,
+        });
+        const nextInbox: CreatedInbox = {
+          address: created.address,
+          expiresAt: created.expiresAt,
+          ownerToken: inbox?.ownerToken ?? '',
+        };
+        const newTab: StoredInboxTab = { id: makeTabId(), inbox: nextInbox };
+        setTabs((prev) => {
+          const next = activeTabId
+            ? prev.map((t) => (t.id === activeTabId ? newTab : t))
+            : [...prev, newTab];
+          saveStoredTabs(next);
+          return next;
+        });
+        setActiveTabId(newTab.id);
+        setEditingAlias(false);
+      } catch (err) {
+        if (err instanceof ApiClientError && err.status === 401) {
+          setAliasHint('Custom aliases require a free account — sign in to claim yours.');
+        } else if (err instanceof ApiClientError) {
+          setAliasHint(err.message);
+        } else {
+          setAliasHint('Could not claim custom alias right now.');
+        }
+      } finally {
+        setAliasBusy(false);
+      }
+    },
+    [aliasDraft, selectedDomain, inbox?.ownerToken, activeTabId],
+  );
+
+  // Draggable split-pane resize
+  const handleSplitPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingSplit(true);
+    const container = splitContainerRef.current;
+    if (!container) return;
+
+    const onMove = (ev: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      const clamped = Math.round(Math.min(58, Math.max(24, pct)));
+      updatePrefs({ splitRatio: clamped });
+    };
+
+    const onUp = () => {
+      setIsDraggingSplit(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [updatePrefs]);
+
+  // Filtered messages
+  const filteredMessages = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return messages;
+    return messages.filter(
+      (m) =>
+        (m.subject || '').toLowerCase().includes(q) ||
+        m.from.toLowerCase().includes(q),
+    );
+  }, [messages, searchQuery]);
+
+  // Extracted verification link for open email
+  const verificationLink = useMemo(() => {
+    if (!fullMessage) return null;
+    return extractVerificationLink(fullMessage.html, fullMessage.text);
+  }, [fullMessage]);
+
+  // Global keyboard shortcuts + Ctrl+K palette
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
+
+      if (paletteOpen || annotatorOpen || qrOpen || editingAlias) return;
+      if (isEditableElement(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const key = e.key.toLowerCase();
+      if (key === 'c') {
+        e.preventDefault();
+        void handleCopyAddress();
+      } else if (key === 'r') {
+        e.preventDefault();
+        void createNewTab(selectedDomain, true);
+      } else if (key === 'n' && tabs.length < MAX_TABS) {
+        e.preventDefault();
+        void createNewTab(selectedDomain, false);
+      } else if (key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (key === 'q' && inbox) {
+        e.preventDefault();
+        setQrOpen(true);
+      } else if (key === 'a' && fullMessage) {
+        e.preventDefault();
+        setAnnotatorOpen(true);
+      } else if (key === '1') {
+        updatePrefs({ layout: 'split' });
+      } else if (key === '2') {
+        updatePrefs({ layout: 'stacked' });
+      } else if (key === '3') {
+        updatePrefs({ layout: 'focus' });
+      } else if (key === 'j' || key === 'k') {
+        if (filteredMessages.length === 0) return;
+        e.preventDefault();
+        const idx = filteredMessages.findIndex((m) => m.id === selectedMsgId);
+        const nextIdx =
+          key === 'j'
+            ? idx < filteredMessages.length - 1
+              ? idx + 1
+              : 0
+            : idx > 0
+              ? idx - 1
+              : filteredMessages.length - 1;
+        const nextMsg = filteredMessages[nextIdx];
+        if (nextMsg) void handleOpenMessage(nextMsg.id);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    paletteOpen,
+    annotatorOpen,
+    qrOpen,
+    editingAlias,
+    handleCopyAddress,
+    createNewTab,
+    selectedDomain,
+    tabs.length,
+    inbox,
+    fullMessage,
+    updatePrefs,
+    filteredMessages,
+    selectedMsgId,
+    handleOpenMessage,
+  ]);
+
+  const paletteActions: PaletteAction[] = useMemo(
+    () => [
+      {
+        id: 'copy',
+        label: 'Copy current email address',
+        hint: inbox?.address,
+        shortcut: 'C',
+        disabled: !inbox,
+        onRun: () => void handleCopyAddress(),
+      },
+      {
+        id: 'new-tab',
+        label: 'Open new inbox tab',
+        hint: `Keep up to ${MAX_TABS} live addresses side by side`,
+        shortcut: 'N',
+        disabled: tabs.length >= MAX_TABS,
+        onRun: () => void createNewTab(selectedDomain, false),
+      },
+      {
+        id: 'regen',
+        label: 'Generate new address in current tab',
+        shortcut: 'R',
+        onRun: () => void createNewTab(selectedDomain, true),
+      },
+      {
+        id: 'extend',
+        label: 'Extend inbox timer (+10 min)',
+        disabled: !inbox,
+        onRun: () => void handleExtend(),
+      },
+      {
+        id: 'qr',
+        label: 'Show QR code for phone transfer',
+        shortcut: 'Q',
+        disabled: !inbox,
+        onRun: () => setQrOpen(true),
+      },
+      {
+        id: 'annotate',
+        label: 'Annotate / redact open email as PNG',
+        shortcut: 'A',
+        disabled: !fullMessage,
+        onRun: () => setAnnotatorOpen(true),
+      },
+      {
+        id: 'layout-split',
+        label: 'Switch to Split layout',
+        shortcut: '1',
+        onRun: () => updatePrefs({ layout: 'split' }),
+      },
+      {
+        id: 'layout-stacked',
+        label: 'Switch to Stacked layout',
+        shortcut: '2',
+        onRun: () => updatePrefs({ layout: 'stacked' }),
+      },
+      {
+        id: 'layout-focus',
+        label: 'Switch to Focus reader layout',
+        shortcut: '3',
+        onRun: () => updatePrefs({ layout: 'focus' }),
+      },
+      {
+        id: 'auto-otp',
+        label: prefs.autoCopyOtp ? 'Disable Auto-Copy OTP' : 'Enable Auto-Copy OTP on arrival',
+        onRun: () => updatePrefs({ autoCopyOtp: !prefs.autoCopyOtp }),
+      },
+    ],
+    [
+      inbox,
+      tabs.length,
+      selectedDomain,
+      fullMessage,
+      prefs.autoCopyOtp,
+      handleCopyAddress,
+      createNewTab,
+      handleExtend,
+      updatePrefs,
+    ],
+  );
+
+  // Typography & density classes
+  const rowPadding = prefs.density === 'compact' ? 'px-3.5 py-2.5' : 'px-4 py-3.5';
+  const bodyFontClass =
+    prefs.fontSize === 'sm'
+      ? 'text-xs leading-relaxed'
+      : prefs.fontSize === 'lg'
+        ? 'text-base leading-relaxed'
+        : 'text-sm leading-relaxed';
+
+  // HTML email paper filter for dark mode
+  const iframePaperClass =
+    prefs.emailPaper === 'dark'
+      ? 'invert-[0.9] hue-rotate-180'
+      : prefs.emailPaper === 'auto'
+        ? 'dark:invert-[0.88] dark:hue-rotate-180'
+        : '';
+
+  const localPart = inbox?.address.split('@')[0] ?? '';
+  const domainPart = inbox?.address.split('@')[1] ?? selectedDomain;
 
   return (
-    <div className="space-y-6">
-      {/* Address Control Card */}
-      <section className="tm-card overflow-hidden rounded-3xl p-5 sm:p-7">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <span className="text-xs font-semibold tracking-wider text-slate-400 uppercase">
-                Your Temporary Address
+    <div className="space-y-4">
+      {/* Multi-Inbox Draggable Tab Strip */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-1 flex-wrap items-center gap-1.5 overflow-x-auto">
+          {tabs.map((tab) => {
+            const isActive = tab.id === activeTab?.id;
+            const shortName = tab.inbox.address.split('@')[0] ?? tab.inbox.address;
+            return (
+              <div
+                key={tab.id}
+                draggable
+                onDragStart={() => setDraggedTabId(tab.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => handleTabDrop(tab.id)}
+                onDragEnd={() => setDraggedTabId(null)}
+                onClick={() => setActiveTabId(tab.id)}
+                role="tab"
+                aria-selected={isActive}
+                title={`${tab.inbox.address} — drag to reorder`}
+                className={`group inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-medium transition-all select-none ${
+                  isActive
+                    ? 'border-zinc-300 bg-white text-zinc-950 shadow-xs dark:border-zinc-700 dark:bg-[#18181b] dark:text-zinc-50'
+                    : 'border-transparent bg-zinc-100/80 text-zinc-600 hover:bg-zinc-200/70 dark:bg-[#111113] dark:text-zinc-400 dark:hover:border-zinc-800 dark:hover:text-zinc-200'
+                }`}
+              >
+                <GripVertical className="h-3 w-3 cursor-grab text-zinc-400 opacity-60 group-hover:opacity-100" />
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    isActive && streamStatus === 'live'
+                      ? 'bg-emerald-500'
+                      : 'bg-zinc-400 dark:bg-zinc-600'
+                  }`}
+                />
+                <span className="max-w-[140px] truncate font-mono">{shortName}</span>
+                {tabs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCloseTab(tab.id);
+                    }}
+                    className="ml-0.5 rounded p-0.5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"
+                    aria-label="Close inbox tab"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+
+          {tabs.length < MAX_TABS && (
+            <button
+              type="button"
+              onClick={() => void createNewTab(selectedDomain, false)}
+              disabled={loadingInbox}
+              className="inline-flex items-center gap-1 rounded-xl border border-dashed border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:bg-white hover:text-zinc-900 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-700 dark:hover:bg-[#18181b] dark:hover:text-zinc-100"
+              title="Open another live disposable inbox (N)"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New Tab
+            </button>
+          )}
+        </div>
+
+        {/* Layout Switcher + Command Palette + Workspace Preferences */}
+        <div className="flex items-center gap-1.5">
+          <div className="hidden items-center rounded-xl border border-zinc-200 bg-zinc-100/70 p-0.5 sm:flex dark:border-zinc-800 dark:bg-[#111113]">
+            {(
+              [
+                { id: 'split', icon: Columns2, label: 'Split (1)' },
+                { id: 'stacked', icon: Rows2, label: 'Stacked (2)' },
+                { id: 'focus', icon: Maximize2, label: 'Focus (3)' },
+              ] as const
+            ).map(({ id, icon: Icon, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => updatePrefs({ layout: id })}
+                title={label}
+                className={`rounded-lg p-1.5 transition-colors ${
+                  prefs.layout === id
+                    ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-50'
+                    : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-950 dark:border-zinc-800 dark:bg-[#111113] dark:text-zinc-400 dark:hover:border-zinc-700 dark:hover:text-zinc-100"
+            title="Command palette & shortcuts (Ctrl+K)"
+          >
+            <Command className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Shortcuts</span>
+            <kbd className="hidden rounded border border-zinc-200 bg-zinc-50 px-1 py-0.2 font-mono text-[10px] text-zinc-400 sm:inline dark:border-zinc-700 dark:bg-zinc-900">
+              ⌘K
+            </kbd>
+          </button>
+
+          {/* Preferences Popover */}
+          <div className="relative" ref={prefsPopoverRef}>
+            <button
+              type="button"
+              onClick={() => setPrefsOpen((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                prefsOpen
+                  ? 'border-zinc-400 bg-zinc-100 text-zinc-950 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-50'
+                  : 'border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:text-zinc-950 dark:border-zinc-800 dark:bg-[#111113] dark:text-zinc-400 dark:hover:border-zinc-700 dark:hover:text-zinc-100'
+              }`}
+              title="Customize workspace"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Customize</span>
+            </button>
+
+            {prefsOpen && (
+              <div className="absolute right-0 z-40 mt-2 w-72 rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl dark:border-zinc-800 dark:bg-[#111113]">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                    Workspace Preferences
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => updatePrefs(DEFAULT_WORKSPACE_PREFS)}
+                    className="text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Reset
+                  </button>
+                </div>
+
+                <div className="space-y-3.5 text-xs">
+                  {/* Layout */}
+                  <div>
+                    <div className="mb-1.5 font-medium text-zinc-600 dark:text-zinc-400">
+                      Layout
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-[#18181b]">
+                      {(['split', 'stacked', 'focus'] as const satisfies readonly WorkspaceLayout[]).map(
+                        (mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => updatePrefs({ layout: mode })}
+                            className={`rounded-lg py-1 font-medium capitalize transition-colors ${
+                              prefs.layout === mode
+                                ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-50'
+                                : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                            }`}
+                          >
+                            {mode}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Density */}
+                  <div>
+                    <div className="mb-1.5 font-medium text-zinc-600 dark:text-zinc-400">
+                      List Density
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-[#18181b]">
+                      {(
+                        ['compact', 'comfortable'] as const satisfies readonly WorkspaceDensity[]
+                      ).map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => updatePrefs({ density: d })}
+                          className={`rounded-lg py-1 font-medium capitalize transition-colors ${
+                            prefs.density === d
+                              ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-50'
+                              : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Text size */}
+                  <div>
+                    <div className="mb-1.5 font-medium text-zinc-600 dark:text-zinc-400">
+                      Reader Text Size
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-[#18181b]">
+                      {(
+                        [
+                          { id: 'sm', label: 'Small' },
+                          { id: 'base', label: 'Default' },
+                          { id: 'lg', label: 'Large' },
+                        ] as const satisfies ReadonlyArray<{
+                          id: WorkspaceFontSize;
+                          label: string;
+                        }>
+                      ).map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => updatePrefs({ fontSize: s.id })}
+                          className={`rounded-lg py-1 font-medium transition-colors ${
+                            prefs.fontSize === s.id
+                              ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-50'
+                              : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* HTML Email Paper */}
+                  <div>
+                    <div className="mb-1.5 font-medium text-zinc-600 dark:text-zinc-400">
+                      HTML Email Paper
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-[#18181b]">
+                      {(['auto', 'light', 'dark'] as const satisfies readonly EmailPaperMode[]).map(
+                        (p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => updatePrefs({ emailPaper: p })}
+                            className={`rounded-lg py-1 font-medium capitalize transition-colors ${
+                              prefs.emailPaper === p
+                                ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-zinc-50'
+                                : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Auto-copy OTP toggle */}
+                  <label className="flex cursor-pointer items-center justify-between rounded-xl border border-zinc-200 px-3 py-2 dark:border-zinc-800">
+                    <div>
+                      <div className="font-medium text-zinc-800 dark:text-zinc-200">
+                        Auto-copy OTP
+                      </div>
+                      <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        Copy code on arrival
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={prefs.autoCopyOtp}
+                      onChange={(e) => updatePrefs({ autoCopyOtp: e.target.checked })}
+                      className="h-4 w-4 rounded accent-blue-600"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Address Bar Card */}
+      <div className="tm-card rounded-2xl p-5 sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                Active Disposable Address
               </span>
               <span
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
                   streamStatus === 'live'
-                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80'
+                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-400 dark:ring-emerald-900/80'
                     : streamStatus === 'connecting'
-                      ? 'bg-sky-50 text-sky-700 ring-1 ring-sky-200/80'
-                      : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/80'
+                      ? 'bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700'
+                      : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:ring-amber-900'
                 }`}
               >
                 <span
@@ -471,483 +1169,690 @@ export function LiveInbox() {
                     streamStatus === 'live'
                       ? 'animate-pulse bg-emerald-500'
                       : streamStatus === 'connecting'
-                        ? 'animate-pulse bg-sky-500'
+                        ? 'bg-blue-500'
                         : 'bg-amber-500'
                   }`}
                 />
                 {streamStatus === 'live'
-                  ? 'Live stream'
+                  ? 'Live'
                   : streamStatus === 'connecting'
-                    ? 'Connecting'
+                    ? 'Connecting...'
                     : 'Offline'}
               </span>
+              {inbox && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-0.5 font-mono text-[11px] font-medium text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+                  <Clock className="h-3 w-3 text-zinc-500" />
+                  {formatCountdown(msLeft)}
+                </span>
+              )}
+              {autoCopiedToast && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                  <Check className="h-3 w-3" />
+                  {autoCopiedToast}
+                </span>
+              )}
             </div>
 
-            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
-              <div className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50/70 via-sky-50/40 to-indigo-50/50 px-4 py-3.5 dark:border-blue-900/70 dark:from-blue-950/60 dark:via-slate-900/80 dark:to-indigo-950/50">
-                {loadingInbox ? (
-                  <div className="h-7 w-64 animate-pulse rounded-lg bg-blue-100/70 dark:bg-slate-800" />
-                ) : (
-                  <span className="truncate font-mono text-base font-semibold text-slate-900 sm:text-lg dark:text-white">
-                    {inbox?.address ?? 'Unavailable'}
-                  </span>
+            {editingAlias ? (
+              <form onSubmit={(e) => void handleSubmitAlias(e)} className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex min-w-0 flex-1 items-center rounded-xl border border-blue-500 bg-zinc-50 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500/20 dark:bg-[#18181b]">
+                    <input
+                      type="text"
+                      value={aliasDraft}
+                      onChange={(e) => setAliasDraft(e.target.value)}
+                      autoFocus
+                      placeholder="custom-alias"
+                      className="min-w-0 flex-1 bg-transparent font-mono text-sm font-semibold text-zinc-950 focus:outline-none dark:text-zinc-50"
+                    />
+                    <span className="shrink-0 font-mono text-sm text-zinc-500 dark:text-zinc-400">
+                      @{domainPart}
+                    </span>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={aliasBusy}
+                    className="rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {aliasBusy ? 'Saving...' : 'Claim'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAlias(false);
+                      setAliasHint(null);
+                    }}
+                    className="rounded-xl border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {aliasHint && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {aliasHint}{' '}
+                    {aliasHint.includes('sign in') && (
+                      <Link href="/login" className="font-semibold underline">
+                        Sign in →
+                      </Link>
+                    )}
+                  </p>
                 )}
+              </form>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50/90 px-3.5 py-2.5 dark:border-zinc-800 dark:bg-[#18181b]">
+                  <span className="truncate font-mono text-sm font-semibold text-zinc-950 sm:text-base dark:text-zinc-50">
+                    {loadingInbox ? 'Generating address...' : inbox ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleStartEditAlias}
+                          className="rounded px-0.5 hover:bg-zinc-200/70 dark:hover:bg-zinc-800"
+                          title="Click to customize alias"
+                        >
+                          {localPart}
+                        </button>
+                        <span className="text-zinc-500 dark:text-zinc-400">@{domainPart}</span>
+                      </>
+                    ) : (
+                      'Unavailable'
+                    )}
+                  </span>
+
+                  <div className="flex shrink-0 items-center gap-1">
+                    {inbox && (
+                      <button
+                        type="button"
+                        onClick={handleStartEditAlias}
+                        className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                        title="Edit alias"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {domains.length > 1 && (
+                      <select
+                        value={selectedDomain}
+                        onChange={(e) => {
+                          setSelectedDomain(e.target.value);
+                          void createNewTab(e.target.value, true);
+                        }}
+                        aria-label="Select domain"
+                        className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-zinc-700 focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-[#111113] dark:text-zinc-200"
+                      >
+                        {domains.map((d) => (
+                          <option key={d} value={d}>
+                            @{d}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => void handleCopyAddress()}
                   disabled={!inbox}
-                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50 ${
-                    copiedAddr
-                      ? 'bg-emerald-500 shadow-emerald-500/20'
-                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-600/25 hover:brightness-110'
-                  }`}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-xs transition-all hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50"
                 >
-                  {copiedAddr ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  {copiedAddr ? 'Copied!' : 'Copy'}
+                  {copiedAddr ? (
+                    <>
+                      <Check className="h-4 w-4" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4" />
+                      Copy
+                    </>
+                  )}
                 </button>
               </div>
+            )}
+          </div>
 
-              {domains.length > 1 && (
-                <select
-                  aria-label="Select domain"
-                  value={selectedDomain}
-                  onChange={(e) => {
-                    const nextDomain = e.target.value;
-                    setSelectedDomain(nextDomain);
-                    void allocateInbox(nextDomain);
-                  }}
-                  className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-blue-900"
-                >
-                  {domains.map((d) => (
-                    <option key={d} value={d}>
-                      @{d}
-                    </option>
-                  ))}
-                </select>
+          {/* Action Toolbar */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setQrOpen(true)}
+              disabled={!inbox}
+              title="Transfer address to phone via QR code (Q)"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-2.5 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-950 disabled:opacity-50 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+            >
+              <QrCode className="h-3.5 w-3.5" />
+              QR
+            </button>
+
+            <button
+              type="button"
+              onClick={() => updatePrefs({ soundEnabled: !prefs.soundEnabled })}
+              title={prefs.soundEnabled ? 'Mute arrival chime' : 'Enable arrival chime'}
+              className={`inline-flex items-center rounded-xl border p-2 transition-colors ${
+                prefs.soundEnabled
+                  ? 'border-zinc-300 bg-zinc-100 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100'
+                  : 'border-zinc-200 bg-white text-zinc-400 hover:text-zinc-700 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-500'
+              }`}
+            >
+              {prefs.soundEnabled ? (
+                <Volume2 className="h-3.5 w-3.5" />
+              ) : (
+                <VolumeX className="h-3.5 w-3.5" />
               )}
-            </div>
-          </div>
+            </button>
 
-          {/* Actions + Countdown */}
-          <div className="flex flex-wrap items-center gap-2 lg:flex-col lg:items-end">
-            <div className="flex items-center gap-2">
-              <div
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 font-mono text-sm font-semibold ${
-                  isLowTime
-                    ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:ring-amber-800'
-                    : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700'
-                }`}
-              >
-                <Clock className="h-4 w-4 text-blue-500 dark:text-sky-400" />
-                {formatCountdown(msLeft)}
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleExtend()}
-                disabled={!inbox}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/70 px-3.5 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/80 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950/60 dark:text-sky-300 dark:hover:bg-blue-900/60"
-              >
-                <Plus className="h-4 w-4" />
-                +10m
-              </button>
-              <button
-                type="button"
-                onClick={() => void allocateInbox(selectedDomain)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-blue-700 dark:hover:bg-slate-800"
-              >
-                <RefreshCw className="h-4 w-4" />
-                New
-              </button>
-              <button
-                type="button"
-                onClick={() => setQrOpen(true)}
-                disabled={!inbox}
-                title="Show QR code for phone"
-                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-sky-700 dark:hover:text-sky-300"
-              >
-                <QrCode className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setSoundEnabled((s) => !s)}
-                title={soundEnabled ? 'Mute arrival chime' : 'Enable arrival chime'}
-                className={`inline-flex items-center justify-center rounded-xl border p-2 transition ${
-                  soundEnabled
-                    ? 'border-blue-200 bg-blue-50/70 text-blue-600 dark:border-blue-800 dark:bg-blue-950/60 dark:text-sky-300'
-                    : 'border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-900'
-                }`}
-              >
-                {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleToggleNotifications()}
-                title={notificationsEnabled ? 'Desktop alerts on' : 'Enable desktop OTP alerts'}
-                className={`inline-flex items-center justify-center rounded-xl border p-2 transition ${
-                  notificationsEnabled
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                    : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
-                }`}
-              >
-                <Bell className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleDeleteInbox()}
-                disabled={!inbox}
-                title="Delete inbox and generate a new one"
-                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-rose-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-300"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
+            <button
+              type="button"
+              onClick={() => void handleToggleNotifications()}
+              title={
+                prefs.notificationsEnabled
+                  ? 'Disable desktop notifications'
+                  : 'Enable desktop notifications'
+              }
+              className={`inline-flex items-center rounded-xl border p-2 transition-colors ${
+                prefs.notificationsEnabled
+                  ? 'border-blue-500/40 bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400'
+                  : 'border-zinc-200 bg-white text-zinc-500 hover:text-zinc-900 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-400 dark:hover:text-zinc-100'
+              }`}
+            >
+              <Bell className="h-3.5 w-3.5" />
+            </button>
 
-        {/* Subtle Expiry Progress Bar */}
-        <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-          <div
-            className={`h-full rounded-full transition-all duration-700 ${
-              isLowTime
-                ? 'bg-gradient-to-r from-amber-400 to-orange-500'
-                : 'bg-gradient-to-r from-blue-600 via-sky-500 to-indigo-500'
-            }`}
-            style={{ width: `${progressPct}%` }}
-          />
+            <button
+              type="button"
+              onClick={() => void handleExtend()}
+              disabled={!inbox}
+              className="inline-flex items-center gap-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-950 disabled:opacity-50 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              10m
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void createNewTab(selectedDomain, true)}
+              disabled={loadingInbox}
+              title="Generate a fresh address (R)"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-2.5 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-950 disabled:opacity-50 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loadingInbox ? 'animate-spin' : ''}`} />
+              New
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleDeleteInbox()}
+              disabled={!inbox || loadingInbox}
+              className="inline-flex items-center rounded-xl border border-zinc-200 bg-white p-2 text-zinc-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-400 dark:hover:border-red-900/70 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+              title="Destroy inbox"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
 
         {error && (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-300">
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-300">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
-      </section>
+      </div>
 
-      {/* Split-Pane Inbox Viewer */}
-      <section className="tm-card grid min-h-[460px] overflow-hidden rounded-3xl lg:grid-cols-12">
-        {/* Message List */}
-        <div className="flex flex-col border-b border-slate-100 lg:col-span-5 lg:border-r lg:border-b-0 dark:border-slate-800">
-          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-5 py-3.5 dark:border-slate-800 dark:bg-slate-900/60">
-            <div className="flex items-center gap-2">
-              <Mail className="h-4 w-4 text-blue-600 dark:text-sky-400" />
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Inbox</h2>
-              <span className="rounded-full bg-blue-100/80 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-sky-300">
-                {messages.length}
-              </span>
+      {/* Resizable / Customizable Workspace Container */}
+      <div
+        ref={splitContainerRef}
+        className={`tm-card overflow-hidden rounded-2xl ${
+          prefs.layout === 'split'
+            ? 'flex flex-col lg:flex-row'
+            : prefs.layout === 'stacked'
+              ? 'flex flex-col'
+              : 'flex flex-col'
+        }`}
+      >
+        {/* Message List Pane (hidden in Focus mode when a message is open) */}
+        {(prefs.layout !== 'focus' || !fullMessage) && (
+          <div
+            style={
+              prefs.layout === 'split'
+                ? { flexBasis: `${prefs.splitRatio}%` }
+                : undefined
+            }
+            className={`flex flex-col border-zinc-200 dark:border-zinc-800 ${
+              prefs.layout === 'split'
+                ? 'min-h-[340px] border-b lg:min-h-[480px] lg:shrink-0 lg:border-b-0'
+                : 'max-h-[280px] border-b'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50/70 px-3.5 py-2.5 dark:border-zinc-800 dark:bg-[#141416]">
+              <div className="flex items-center gap-2">
+                <Mail className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                  Inbox
+                </span>
+                <span className="rounded-full bg-zinc-200/80 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                  {messages.length}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => inbox && void refreshMessages(inbox.address)}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                title="Refresh messages"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => inbox && void refreshMessages(inbox.address)}
-              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-white hover:text-blue-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-sky-300"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Refresh
-            </button>
-          </div>
 
-          {messages.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
-              <Image
-                src="/images/empty-inbox.svg"
-                alt="Waiting for emails"
-                width={190}
-                height={146}
-                className="mb-3 opacity-95"
-              />
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Waiting for incoming mail…
-              </p>
-              <p className="mt-1 max-w-xs text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                Send a verification code or email to your address above. New messages appear here
-                automatically in real time.
-              </p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
-              {messages.map((msg) => {
-                const isSelected = selectedMsgId === msg.id;
-                return (
-                  <li key={msg.id}>
+            {/* Search bar inside message list */}
+            {messages.length > 0 && (
+              <div className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+                <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 dark:border-zinc-800 dark:bg-[#18181b]">
+                  <Search className="h-3.5 w-3.5 text-zinc-400" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Filter sender or subject... (/)"
+                    className="w-full bg-transparent text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                  />
+                  {searchQuery && (
                     <button
                       type="button"
-                      onClick={() => setSelectedMsgId(msg.id)}
-                      className={`w-full px-5 py-4 text-left transition ${
-                        isSelected
-                          ? 'bg-blue-50/75 ring-1 ring-inset ring-blue-200/70 dark:bg-blue-950/60 dark:ring-blue-800/70'
-                          : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50'
-                      }`}
+                      onClick={() => setSearchQuery('')}
+                      className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-xs font-semibold text-blue-700 dark:text-sky-400">
-                          {msg.from || 'Unknown sender'}
-                        </span>
-                        <span className="shrink-0 text-[11px] text-slate-400">
-                          {formatTime(msg.date)}
-                        </span>
-                      </div>
-                      <p className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">
-                        {msg.subject || '(No subject)'}
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        {msg.hasOtp && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                            <Sparkles className="h-3 w-3" />
-                            OTP detected
-                          </span>
-                        )}
-                        {msg.attachmentCount > 0 && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                            <Paperclip className="h-3 w-3" />
-                            {msg.attachmentCount}
-                          </span>
-                        )}
-                        {msg.spamFlagged && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-                            <AlertTriangle className="h-3 w-3" />
-                            Suspicious
-                          </span>
-                        )}
-                      </div>
+                      <X className="h-3 w-3" />
                     </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {/* Message Reader */}
-        <div className="flex flex-col bg-white lg:col-span-7 dark:bg-slate-950/40">
-          {!selectedMsgId ? (
-            <div className="flex flex-1 flex-col items-center justify-center p-10 text-center text-slate-400">
-              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-500 dark:bg-blue-950/70 dark:text-sky-400">
-                <Mail className="h-6 w-6" />
+                  )}
+                </div>
               </div>
-              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+            )}
+
+            {messages.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
+                <Image
+                  src="/images/empty-inbox.svg"
+                  alt="Waiting for incoming emails"
+                  width={120}
+                  height={96}
+                  className="mb-3 opacity-85"
+                />
+                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Waiting for incoming mail
+                </p>
+                <p className="mt-1 max-w-[230px] text-xs text-zinc-500 dark:text-zinc-400">
+                  Copy your address above. Messages arrive instantly with zero page refresh.
+                </p>
+              </div>
+            ) : filteredMessages.length === 0 ? (
+              <div className="flex flex-1 items-center justify-center p-8 text-xs text-zinc-500 dark:text-zinc-400">
+                No messages match &ldquo;{searchQuery}&rdquo;
+              </div>
+            ) : (
+              <ul className="divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800/80">
+                {filteredMessages.map((m) => {
+                  const active = m.id === selectedMsgId;
+                  return (
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        onClick={() => void handleOpenMessage(m.id)}
+                        className={`w-full text-left transition-colors ${rowPadding} ${
+                          active
+                            ? 'bg-zinc-100/90 dark:bg-[#1c1c20]'
+                            : 'hover:bg-zinc-50 dark:hover:bg-[#161619]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`truncate text-xs font-semibold ${
+                              active
+                                ? 'text-blue-600 dark:text-blue-400'
+                                : 'text-zinc-900 dark:text-zinc-100'
+                            }`}
+                          >
+                            {m.from}
+                          </span>
+                          <span className="shrink-0 text-[11px] text-zinc-400 dark:text-zinc-500">
+                            {formatTime(m.date)}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 truncate text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                          {m.subject || '(No subject)'}
+                        </p>
+                        {(m.hasOtp || m.attachmentCount > 0) && (
+                          <div className="mt-1.5 flex items-center gap-1.5">
+                            {m.hasOtp && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                                <Sparkles className="h-2.5 w-2.5" />
+                                OTP
+                              </span>
+                            )}
+                            {m.attachmentCount > 0 && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                                <Paperclip className="h-2.5 w-2.5" />
+                                {m.attachmentCount}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {/* Draggable Split-Pane Divider (Desktop Split View) */}
+        {prefs.layout === 'split' && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Drag to resize message list and reader"
+            title="Drag to resize • Double-click to reset"
+            onPointerDown={handleSplitPointerDown}
+            onDoubleClick={() => updatePrefs({ splitRatio: DEFAULT_WORKSPACE_PREFS.splitRatio })}
+            className={`tm-resize-handle hidden w-2 shrink-0 items-center justify-center border-x border-zinc-200/80 transition-colors lg:flex dark:border-zinc-800 ${
+              isDraggingSplit
+                ? 'bg-blue-500/20'
+                : 'bg-zinc-50/70 hover:bg-zinc-200/70 dark:bg-[#141416] dark:hover:bg-zinc-800'
+            }`}
+          >
+            <div className="h-8 w-0.5 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+          </div>
+        )}
+
+        {/* Message Reader Pane */}
+        <div className="flex min-h-[420px] min-w-0 flex-1 flex-col bg-white dark:bg-[#111113]">
+          {loadingMessage ? (
+            <div className="flex flex-1 items-center justify-center p-10 text-sm text-zinc-500 dark:text-zinc-400">
+              Loading message...
+            </div>
+          ) : !fullMessage ? (
+            <div className="flex flex-1 flex-col items-center justify-center p-10 text-center">
+              <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-500 dark:bg-[#18181b] dark:text-zinc-400">
+                <Mail className="h-5 w-5" />
+              </div>
+              <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
                 Select a message to read
               </p>
-              <p className="mt-1 text-xs text-slate-400">
-                HTML is automatically sanitized and remote trackers are stripped.
+              <p className="mt-1 max-w-xs text-xs text-zinc-500 dark:text-zinc-400">
+                Drag the center divider to resize, press{' '}
+                <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 py-0.5 font-mono text-[10px] dark:border-zinc-700 dark:bg-zinc-900">
+                  J
+                </kbd>
+                /
+                <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 py-0.5 font-mono text-[10px] dark:border-zinc-700 dark:bg-zinc-900">
+                  K
+                </kbd>{' '}
+                to navigate, or{' '}
+                <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 py-0.5 font-mono text-[10px] dark:border-zinc-700 dark:bg-zinc-900">
+                  Ctrl+K
+                </kbd>{' '}
+                for commands.
               </p>
-            </div>
-          ) : loadingMessage || !fullMessage ? (
-            <div className="space-y-4 p-6">
-              <div className="h-6 w-2/3 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
-              <div className="h-4 w-1/3 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
-              <div className="h-48 w-full animate-pulse rounded-2xl bg-slate-50 dark:bg-slate-900" />
             </div>
           ) : (
             <div className="flex flex-1 flex-col">
-              {/* Message Header */}
-              <div className="border-b border-slate-100 p-5 sm:p-6 dark:border-slate-800">
-                <div className="flex items-start justify-between gap-4">
+              {/* Reader Header */}
+              <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+                {prefs.layout === 'focus' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMsgId(null);
+                      setFullMessage(null);
+                    }}
+                    className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    ← Back to inbox list
+                  </button>
+                )}
+
+                <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                    <h2 className="truncate text-base font-bold text-zinc-950 dark:text-zinc-50">
                       {fullMessage.subject || '(No subject)'}
-                    </h3>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      From{' '}
-                      <span className="font-semibold text-slate-700 dark:text-slate-200">
+                    </h2>
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      From:{' '}
+                      <span className="font-medium text-zinc-800 dark:text-zinc-200">
                         {fullMessage.from}
                       </span>{' '}
                       · {new Date(fullMessage.date).toLocaleString()}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
+
+                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                    {fullMessage.html && (
+                      <div className="inline-flex rounded-lg border border-zinc-200 p-0.5 text-xs dark:border-zinc-800">
+                        <button
+                          type="button"
+                          onClick={() => setViewMode('html')}
+                          className={`rounded-md px-2 py-1 font-medium ${
+                            viewMode === 'html'
+                              ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                              : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                          }`}
+                        >
+                          HTML
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setViewMode('text')}
+                          className={`rounded-md px-2 py-1 font-medium ${
+                            viewMode === 'text'
+                              ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                              : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                          }`}
+                        >
+                          Text
+                        </button>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setAnnotatorOpen(true)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-300 dark:hover:bg-zinc-800"
+                      title="Draw, highlight, or redact & export PNG (A)"
+                    >
+                      <PenLine className="h-3.5 w-3.5" />
+                      Annotate
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => downloadMessageAsEml(fullMessage)}
-                      className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-2.5 py-2 text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-sky-700 dark:hover:bg-slate-800"
-                      title="Download as .eml"
+                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-300 dark:hover:bg-zinc-800"
+                      title="Download .eml"
                     >
                       <Download className="h-3.5 w-3.5" />
                       .eml
                     </button>
+
                     <button
                       type="button"
                       onClick={() => void handleDeleteMessage(fullMessage.id)}
-                      className="rounded-xl border border-slate-200 p-2 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-slate-700 dark:hover:border-rose-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-300"
+                      className="rounded-lg border border-zinc-200 p-1.5 text-zinc-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-400 dark:hover:border-red-900/70 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                       title="Delete message"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </div>
 
-                {/* OTP Quick Copy Card */}
-                {fullMessage.otp && (
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200/80 bg-gradient-to-r from-emerald-50 via-teal-50/60 to-sky-50 px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500 text-white">
-                        <Sparkles className="h-4 w-4" />
-                      </span>
-                      <div>
-                        <p className="text-[11px] font-semibold tracking-wide text-emerald-700 uppercase">
-                          Verification Code Detected
-                        </p>
-                        <p className="font-mono text-xl font-bold tracking-widest text-slate-900">
-                          {fullMessage.otp}
-                        </p>
+                {/* Privacy Shield Badges */}
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                    <ShieldCheck className="h-3 w-3" />
+                    Sanitized HTML
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 font-medium text-zinc-600 dark:bg-[#18181b] dark:text-zinc-400">
+                    Trackers &amp; scripts blocked
+                  </span>
+                </div>
+
+                {/* Smart Action Strip: OTP + One-Click Verification Link */}
+                {(fullMessage.otp || verificationLink) && (
+                  <div className="mt-3.5 flex flex-col gap-2 sm:flex-row">
+                    {fullMessage.otp && (
+                      <div className="flex flex-1 items-center justify-between gap-3 rounded-xl border border-blue-200/80 bg-blue-50/70 px-3.5 py-2.5 dark:border-blue-900/60 dark:bg-blue-950/30">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                          <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                            OTP
+                          </span>
+                          <span className="font-mono text-base font-bold tracking-widest text-blue-700 dark:text-blue-300">
+                            {fullMessage.otp}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyOtp(fullMessage.otp!)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                        >
+                          {copiedOtp ? (
+                            <>
+                              <Check className="h-3.5 w-3.5" />
+                              Copied
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3.5 w-3.5" />
+                              Copy
+                            </>
+                          )}
+                        </button>
                       </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void handleCopyOtp(fullMessage.otp ?? '')}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
-                    >
-                      {copiedOtp ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                      {copiedOtp ? 'Copied code!' : 'Copy OTP'}
-                    </button>
-                  </div>
-                )}
+                    )}
 
-                {/* Verification Links */}
-                {fullMessage.links.length > 0 && (
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {fullMessage.links.slice(0, 3).map((link, idx) => (
-                      <a
-                        key={link}
-                        href={link}
-                        target="_blank"
-                        rel="noopener noreferrer nofollow"
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Open Verification Link {fullMessage.links.length > 1 ? `#${idx + 1}` : ''}
-                      </a>
-                    ))}
-                  </div>
-                )}
-
-                {/* Toolbar: HTML/Text toggle + privacy badge */}
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                  <div className="inline-flex rounded-xl bg-slate-100 p-1 text-xs font-medium dark:bg-slate-900">
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('html')}
-                      disabled={!fullMessage.html}
-                      className={`rounded-lg px-3 py-1 transition ${
-                        viewMode === 'html'
-                          ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-800 dark:text-sky-300'
-                          : 'text-slate-600 hover:text-slate-900 disabled:opacity-40 dark:text-slate-400 dark:hover:text-white'
-                      }`}
-                    >
-                      Rich HTML
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('text')}
-                      className={`rounded-lg px-3 py-1 transition ${
-                        viewMode === 'text'
-                          ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-800 dark:text-sky-300'
-                          : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-                      }`}
-                    >
-                      Plain Text
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300">
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      Sanitized HTML
-                    </span>
-                    {fullMessage.hasRemoteContent && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300">
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        Remote trackers blocked
-                      </span>
+                    {verificationLink && (
+                      <div className="flex flex-1 items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 dark:border-zinc-800 dark:bg-[#18181b]">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                            <Link2 className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                            <span className="truncate">{verificationLink.label}</span>
+                          </div>
+                          <div className="truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                            {verificationLink.domain}
+                          </div>
+                        </div>
+                        <a
+                          href={verificationLink.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                        >
+                          Open
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
                     )}
                   </div>
-                </div>
-              </div>
-
-              {/* Message Body */}
-              <div className="flex-1 p-5 sm:p-6">
-                {viewMode === 'html' && fullMessage.html ? (
-                  <iframe
-                    title="Email content"
-                    sandbox="allow-popups allow-popups-to-escape-sandbox"
-                    srcDoc={`<!doctype html><html><head><style>body{font-family:system-ui,-apple-system,sans-serif;color:#1e293b;line-height:1.6;margin:0;padding:4px;font-size:14px;word-wrap:break-word;}a{color:#2563eb;}</style></head><body>${fullMessage.html}</body></html>`}
-                    className="min-h-[260px] w-full rounded-2xl border border-slate-100 bg-white p-2 dark:border-slate-800"
-                  />
-                ) : (
-                  <pre className="whitespace-pre-wrap rounded-2xl bg-slate-50/80 p-4 font-mono text-xs leading-relaxed text-slate-700 dark:bg-slate-900/80 dark:text-slate-200">
-                    {fullMessage.text || '(Empty message body)'}
-                  </pre>
                 )}
 
                 {/* Attachments */}
                 {fullMessage.attachments.length > 0 && inbox && (
-                  <div className="mt-5 border-t border-slate-100 pt-4">
-                    <p className="mb-2 text-xs font-semibold text-slate-500 uppercase">
-                      Attachments
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {fullMessage.attachments.map((att) => (
-                        <a
-                          key={att.index}
-                          href={api.getAttachmentUrl(inbox.address, fullMessage.id, att.index)}
-                          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                        >
-                          <Paperclip className="h-3.5 w-3.5 text-blue-500" />
-                          <span className="max-w-[180px] truncate">{att.filename}</span>
-                          <span className="text-slate-400">({formatBytes(att.size)})</span>
-                        </a>
-                      ))}
-                    </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {fullMessage.attachments.map((att) => (
+                      <a
+                        key={att.index}
+                        href={api.getAttachmentUrl(inbox.address, fullMessage.id, att.index)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:border-blue-400 hover:text-blue-600 dark:border-zinc-800 dark:bg-[#18181b] dark:text-zinc-300 dark:hover:text-blue-400"
+                      >
+                        <Paperclip className="h-3.5 w-3.5" />
+                        <span className="max-w-[160px] truncate">{att.filename}</span>
+                        <span className="text-zinc-400">({formatBytes(att.size)})</span>
+                        <ExternalLink className="h-3 w-3 opacity-60" />
+                      </a>
+                    ))}
                   </div>
+                )}
+              </div>
+
+              {/* Message Body */}
+              <div className="flex-1 p-5">
+                {viewMode === 'html' && fullMessage.html ? (
+                  <iframe
+                    title="Email content"
+                    sandbox="allow-popups allow-popups-to-escape-sandbox"
+                    srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:system-ui,-apple-system,sans-serif;color:#09090b;background:#ffffff;margin:0;padding:12px;line-height:1.6;font-size:${prefs.fontSize === 'sm' ? '13px' : prefs.fontSize === 'lg' ? '16px' : '14px'};word-break:break-word;}a{color:#2563eb;}img{max-width:100%;height:auto;}</style></head><body>${fullMessage.html}</body></html>`}
+                    className={`min-h-[320px] w-full rounded-xl border border-zinc-200 bg-white transition-all dark:border-zinc-800 ${iframePaperClass}`}
+                  />
+                ) : (
+                  <pre
+                    className={`whitespace-pre-wrap break-words font-sans text-zinc-800 dark:text-zinc-200 ${bodyFontClass}`}
+                  >
+                    {fullMessage.text || '(Empty message body)'}
+                  </pre>
                 )}
               </div>
             </div>
           )}
         </div>
-      </section>
-      {/* QR Code Transfer Modal */}
+      </div>
+
+      {/* QR Code Phone Transfer Modal */}
       {qrOpen && inbox && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-xs"
           onClick={() => setQrOpen(false)}
         >
           <div
-            className="tm-card w-full max-w-sm rounded-3xl p-6 text-center"
+            className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 text-center shadow-2xl dark:border-zinc-800 dark:bg-[#111113]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Scan to use on phone
-              </h3>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                <QrCode className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                Transfer to Phone
+              </div>
               <button
                 type="button"
                 onClick={() => setQrOpen(false)}
-                className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                aria-label="Close QR modal"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="my-5 flex justify-center">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Scan with your phone camera to copy this disposable address instantly.
+            </p>
+            <div className="mx-auto my-5 flex h-56 w-56 items-center justify-center rounded-2xl border border-zinc-200 bg-white p-3 dark:border-zinc-800">
               {qrDataUrl ? (
-                <img
-                  src={qrDataUrl}
-                  alt={`QR code for ${inbox.address}`}
-                  width={220}
-                  height={220}
-                  className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm"
-                />
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={qrDataUrl} alt="Disposable email QR code" className="h-full w-full" />
               ) : (
-                <div className="h-[220px] w-[220px] animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800" />
+                <span className="text-xs text-zinc-400">Generating QR...</span>
               )}
             </div>
-            <p className="break-all font-mono text-xs font-semibold text-blue-700 dark:text-sky-300">
+            <div className="truncate rounded-xl bg-zinc-100 px-3 py-2 font-mono text-xs font-semibold text-zinc-800 dark:bg-[#18181b] dark:text-zinc-200">
               {inbox.address}
-            </p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Scan with your phone camera to copy this temporary address instantly.
-            </p>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Drawable Email Annotator & Redactor Modal */}
+      {annotatorOpen && fullMessage && (
+        <EmailAnnotatorModal message={fullMessage} onClose={() => setAnnotatorOpen(false)} />
+      )}
+
+      {/* Command Palette (Ctrl+K) */}
+      <CommandPalette
+        open={paletteOpen}
+        actions={paletteActions}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   );
 }

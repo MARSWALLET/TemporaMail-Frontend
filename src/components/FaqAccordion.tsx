@@ -30,7 +30,7 @@ export function FaqAccordion() {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   return (
-    <div className="divide-y divide-slate-200/80 overflow-hidden rounded-3xl tm-card dark:divide-slate-800">
+    <div className="divide-y divide-zinc-200/80 overflow-hidden rounded-2xl tm-card dark:divide-zinc-800">
       {FAQ_ITEMS.map((item, idx) => {
         const isOpen = openIndex === idx;
         return (
@@ -38,17 +38,17 @@ export function FaqAccordion() {
             <button
               type="button"
               onClick={() => setOpenIndex(isOpen ? null : idx)}
-              className="flex w-full items-center justify-between gap-4 px-6 py-4.5 text-left transition hover:bg-blue-50/40 dark:hover:bg-slate-900/60"
+              className="flex w-full items-center justify-between gap-4 px-6 py-4.5 text-left transition hover:bg-zinc-50 dark:hover:bg-[#18181b]"
             >
-              <span className="text-sm font-semibold text-slate-900 dark:text-white">{item.q}</span>
+              <span className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">{item.q}</span>
               <ChevronDown
-                className={`h-4 w-4 shrink-0 text-blue-600 transition-transform duration-200 dark:text-sky-400 ${
-                  isOpen ? 'rotate-180' : ''
+                className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-200 dark:text-zinc-400 ${
+                  isOpen ? 'rotate-180 text-blue-600 dark:text-blue-400' : ''
                 }`}
               />
             </button>
             {isOpen && (
-              <div className="px-6 pb-5 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+              <div className="px-6 pb-5 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
                 {item.a}
               </div>
             )}

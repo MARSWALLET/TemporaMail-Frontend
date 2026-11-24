@@ -37,16 +37,16 @@ export default function RootLayout({ children }: { readonly children: ReactNode 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="min-h-screen bg-white font-sans text-slate-900 antialiased dark:bg-[#060b18] dark:text-slate-100">
+      <body className="min-h-screen bg-white font-sans text-zinc-950 antialiased dark:bg-[#09090b] dark:text-zinc-100">
         <ThemeProvider>
           <AuthProvider>
             <div className="flex min-h-screen flex-col">
               <Navbar />
               <main className="flex-1">{children}</main>
-              <footer className="border-t border-slate-100 bg-white py-6 dark:border-slate-800/80 dark:bg-[#060b18]">
-                <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 text-xs text-slate-500 sm:flex-row sm:px-6 dark:text-slate-400">
+              <footer className="border-t border-zinc-200/80 bg-white py-6 dark:border-zinc-800/80 dark:bg-[#09090b]">
+                <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 text-xs text-zinc-500 sm:flex-row sm:px-6 dark:text-zinc-400">
                   <p>
-                    <span className="font-semibold text-slate-700 dark:text-slate-200">
+                    <span className="font-semibold text-zinc-800 dark:text-zinc-200">
                       TemporaMail
                     </span>{' '}
                     · Receive-only disposable email with automatic expiry.
@@ -54,7 +54,7 @@ export default function RootLayout({ children }: { readonly children: ReactNode 
                   <div className="flex flex-wrap items-center gap-4">
                     <a
                       href="/developers"
-                      className="font-medium text-slate-600 transition hover:text-blue-600 dark:text-slate-300 dark:hover:text-sky-400"
+                      className="font-medium text-zinc-600 transition hover:text-blue-600 dark:text-zinc-300 dark:hover:text-blue-400"
                     >
                       Developer API
                     </a>
@@ -63,7 +63,7 @@ export default function RootLayout({ children }: { readonly children: ReactNode 
                       href="https://globeverify.com"
                       target="_blank"
                       rel="noopener"
-                      className="font-medium text-blue-600 transition hover:underline dark:text-sky-400"
+                      className="font-medium text-blue-600 transition hover:underline dark:text-blue-400"
                     >
                       SMS Verification by GlobeVerify
                     </a>

@@ -17,70 +17,68 @@
 
 body {
   background-color: #ffffff;
-  color: #0f172a;
-  transition: background-color 200ms ease, color 200ms ease;
+  color: #09090b;
+  transition: background-color 180ms ease, color 180ms ease;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 .dark body {
-  background-color: #060b18;
-  color: #f1f5f9;
+  background-color: #09090b;
+  color: #fafafa;
 }
 
-/* Soft luminous ambient mesh in white, sky blue, royal blue & subtle indigo */
+/* Light mode: crisp white with very subtle royal/sky top sheen */
 .tm-hero-bg {
   background:
-    radial-gradient(60% 50% at 85% 10%, rgba(14, 165, 233, 0.11) 0%, rgba(255, 255, 255, 0) 70%),
-    radial-gradient(50% 45% at 10% 15%, rgba(37, 99, 235, 0.08) 0%, rgba(255, 255, 255, 0) 70%),
-    radial-gradient(45% 40% at 50% 0%, rgba(99, 102, 241, 0.06) 0%, rgba(255, 255, 255, 0) 70%),
+    radial-gradient(60% 45% at 85% 6%, rgba(14, 165, 233, 0.09) 0%, rgba(255, 255, 255, 0) 70%),
+    radial-gradient(50% 40% at 12% 10%, rgba(37, 99, 235, 0.06) 0%, rgba(255, 255, 255, 0) 70%),
     #ffffff;
 }
 
+/* Dark mode: true neutral obsidian (#09090b), zero washed-out navy haze */
 .dark .tm-hero-bg {
   background:
-    radial-gradient(55% 45% at 85% 8%, rgba(14, 165, 233, 0.18) 0%, rgba(6, 11, 24, 0) 70%),
-    radial-gradient(50% 45% at 12% 14%, rgba(37, 99, 235, 0.16) 0%, rgba(6, 11, 24, 0) 70%),
-    radial-gradient(45% 38% at 50% 0%, rgba(99, 102, 241, 0.14) 0%, rgba(6, 11, 24, 0) 70%),
-    #060b18;
+    radial-gradient(50% 28% at 50% 0%, rgba(255, 255, 255, 0.035) 0%, rgba(9, 9, 11, 0) 70%),
+    #09090b;
 }
 
 .tm-card {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: #ffffff;
+  border: 1px solid #e4e4e7;
   box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.03),
-    0 12px 32px -12px rgba(37, 99, 235, 0.08);
+    0 1px 2px rgba(9, 9, 11, 0.04),
+    0 12px 30px -16px rgba(9, 9, 11, 0.08);
 }
 
 .dark .tm-card {
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(51, 65, 85, 0.72);
+  background: #111113;
+  border: 1px solid #27272a;
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.35),
-    0 16px 36px -14px rgba(37, 99, 235, 0.2);
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 18px 40px -20px rgba(0, 0, 0, 0.75);
 }
 
 .dark .tm-card h1,
 .dark .tm-card h2,
 .dark .tm-card h3 {
-  color: #f8fafc;
+  color: #fafafa;
 }
 
 .dark .tm-card label {
-  color: #cbd5e1;
+  color: #d4d4d8;
 }
 
 .dark .tm-card input:not([type="checkbox"]),
 .dark .tm-card select,
 .dark .tm-card textarea {
-  background-color: rgba(15, 23, 42, 0.9);
-  border-color: rgba(71, 85, 105, 0.8);
-  color: #f8fafc;
+  background-color: #18181b;
+  border-color: #27272a;
+  color: #fafafa;
 }
 
 .dark .tm-card input::placeholder {
-  color: #64748b;
+  color: #71717a;
 }
 
 @keyframes tm-float {
@@ -88,12 +86,20 @@ body {
     transform: translateY(0px);
   }
   50% {
-    transform: translateY(-7px);
+    transform: translateY(-6px);
   }
 }
 
 .animate-tm-float {
   animation: tm-float 5.5s ease-in-out infinite;
+}
+
+/* Subtle drag handle indicator */
+.tm-resize-handle {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
 }
 
 /* Smooth custom scrollbars */
@@ -105,9 +111,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
+  background: rgba(113, 113, 122, 0.32);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(59, 130, 246, 0.45);
+  background: rgba(161, 161, 170, 0.55);
 }
